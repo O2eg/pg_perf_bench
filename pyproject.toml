@@ -1,0 +1,87 @@
+[build-system]
+requires = ["setuptools>=77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pg-perf-bench"
+version = "0.1.0"
+description = "Reproducible PostgreSQL benchmark runner with environment evidence and portable reports"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = [
+  "LICENSE",
+  "src/pg_perf_bench/templates/vendor/*LICENSE*",
+  "src/pg_perf_bench/templates/vendor/*NOTICE*",
+  "src/pg_perf_bench/templates/vendor/THIRD_PARTY_LICENSES.txt",
+]
+authors = [
+  { name = "O2eg", email = "oleg.ispu@yandex.ru" },
+]
+keywords = ["postgresql", "benchmark", "pgbench", "performance", "diagnostics"]
+dependencies = [
+  "PyYAML>=6.0,<7",
+  "asyncpg>=0.29,<1",
+  "asyncssh>=2.21,<3",
+  "docker>=7.1,<8",
+  "aenum>=3.1,<4; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.3,<9",
+  "tomli>=2.0; python_version < '3.11'",
+]
+dev = [
+  "build>=1.2,<2",
+  "pytest>=8.3,<9",
+  "pytest-cov>=6,<8",
+  "ruff>=0.12,<1",
+  "tomli>=2.0; python_version < '3.11'",
+  "twine>=6,<7",
+]
+
+[project.scripts]
+pg-perf-bench = "pg_perf_bench.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/O2eg/pg_perf_bench"
+Repository = "https://github.com/O2eg/pg_perf_bench"
+Issues = "https://github.com/O2eg/pg_perf_bench/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["pg_perf_bench*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+pg_perf_bench = [
+  "commands/**/*.sh",
+  "commands/**/*.sql",
+  "join_tasks/*.json",
+  "templates/*.json",
+  "templates/*.html",
+  "templates/vendor/*",
+]
+
+[tool.pytest.ini_options]
+addopts = "-ra -m 'not integration'"
+testpaths = ["tests"]
+python_files = ["test_*.py", "commands.py", "processing.py"]
+markers = [
+  "integration: requires an explicitly provisioned external PostgreSQL stand",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.format]
+quote-style = "single"

@@ -1,0 +1,408 @@
+import copy
+import difflib
+import json
+import os
+from pathlib import Path
+
+from pg_perf_bench.const import (
+    JOIN_TASKS_PATH,
+    get_datetime_report,
+    get_default_report_name,
+)
+from pg_perf_bench.log import display_user_configuration
+from pg_perf_bench.report.processing import parse_json_in_order
+
+
+class ReportJoiner:
+    """
+    A stateless utility class that provides functionality for joining
+    multiple JSON reports by comparing and merging their data.
+    All methods are static since they do not rely on instance state.
+    """
+
+    @staticmethod
+    def load_reports(
+        logger, input_dir: str, reference_report: str
+    ) -> tuple[list[str], list[dict]] | None:
+        """
+        Loads JSON reports from the input directory. If a reference report is specified,
+        it is moved to the beginning of the list.
+        """
+        if not os.path.isdir(input_dir):
+            logger.error(f'Invalid directory: {input_dir}')
+            return None
+
+        files = [f for f in sorted(os.listdir(input_dir)) if f.endswith('.json')]
+        if not files:
+            logger.error(f'No JSON files in {input_dir}')
+            return None
+
+        if reference_report and reference_report not in files:
+            logger.error(f'Reference report not found: {reference_report}')
+            return None
+        if reference_report in files:
+            idx = files.index(reference_report)
+            files[0], files[idx] = files[idx], files[0]
+
+        loaded_names = []
+        reports = []
+        for f in files:
+            path = os.path.join(input_dir, f)
+            try:
+                with open(path, encoding='utf-8') as rf:
+                    data = json.load(rf)
+                    if isinstance(data, dict):
+                        loaded_names.append(f)
+                        reports.append(data)
+                    elif f == reference_report:
+                        logger.error(f'Reference report is not a JSON object: {f}')
+                        return None
+                    else:
+                        logger.warning(f'Skipping non-object JSON report: {f}')
+            except (OSError, json.JSONDecodeError) as e:
+                logger.warning(f'Cannot load {f}: {e}')
+                if f == reference_report:
+                    logger.error(f'Reference report could not be loaded: {f}')
+                    return None
+
+        return (loaded_names, reports) if reports else None
+
+    @staticmethod
+    def load_compare_items(logger, join_tasks_file: str) -> list[str] | None:
+        """
+        Loads the list of items to compare from a join_tasks JSON file.
+        """
+        if Path(join_tasks_file).name != join_tasks_file:
+            logger.error(f'Unsafe join_tasks name: {join_tasks_file!r}')
+            return None
+        path = JOIN_TASKS_PATH / join_tasks_file
+        if not os.path.isfile(path):
+            logger.error(f'join_tasks not found: {path}')
+            return None
+        try:
+            with open(path, encoding='utf-8') as f:
+                data = json.load(f)
+            items = data.get('items')
+            if not isinstance(items, list) or not items:
+                return None
+            if not all(isinstance(item, str) and item.strip() for item in items):
+                logger.error('Every join comparison item must be a non-empty dotted path')
+                return None
+            return items
+        except (OSError, json.JSONDecodeError) as e:
+            logger.error(f'Cannot parse join_tasks: {e}')
+            return None
+
+    @staticmethod
+    def compare_data(logger, ref_data, cmp_data) -> bool:
+        """
+        Compares two data objects (strings or lists).
+        If they differ, prints the diff to debug and returns False.
+        """
+        if isinstance(ref_data, str) and isinstance(cmp_data, str):
+            if ref_data != cmp_data:
+                diff = difflib.ndiff(ref_data.splitlines(), cmp_data.splitlines())
+                logger.debug('\n'.join(diff))
+                return False
+            return True
+
+        if isinstance(ref_data, list) and isinstance(cmp_data, list):
+            if len(ref_data) != len(cmp_data):
+                logger.debug('List length mismatch')
+                return False
+            for i, (r, c) in enumerate(zip(ref_data, cmp_data, strict=True)):
+                if r != c:
+                    logger.debug(f'Row mismatch at {i}: {r} != {c}')
+                    return False
+            return True
+
+        return ref_data == cmp_data
+
+    @staticmethod
+    def _value_at_path(report: dict, dotted_path: str):
+        value = report
+        for component in dotted_path.split('.'):
+            if not isinstance(value, dict) or component not in value:
+                raise ValueError(f'Comparison item is missing: {dotted_path}')
+            value = value[component]
+        return value
+
+    @staticmethod
+    def compare_reports(
+        logger,
+        ref_rep: dict,
+        cmp_rep: dict,
+        compare_items: list[str],
+        diff_target: dict | None = None,
+        *,
+        reference_label: str | None = None,
+        comparison_label: str | None = None,
+    ) -> bool:
+        """
+        Compares two reports based on their step order and data.
+        Raises ValueError if a mismatch occurs in unlisted items.
+        """
+        ref_steps, _ = parse_json_in_order(ref_rep)
+        cmp_steps, _ = parse_json_in_order(cmp_rep)
+        if len(ref_steps) != len(cmp_steps):
+            raise ValueError('Different step counts')
+
+        reference_label = reference_label or ref_rep.get('report_name', 'Unnamed')
+        comparison_label = comparison_label or cmp_rep.get('report_name', 'Unnamed')
+
+        for item_path in compare_items:
+            left = ReportJoiner._value_at_path(ref_rep, item_path)
+            right = ReportJoiner._value_at_path(cmp_rep, item_path)
+            if not ReportJoiner.compare_data(logger, left, right):
+                raise ValueError(
+                    f'Required comparison item differs: {item_path}\n'
+                    f'reference report - {reference_label}\n'
+                    f'comparable report - {comparison_label}'
+                )
+
+        for i, (s1, s2) in enumerate(zip(ref_steps, cmp_steps, strict=True)):
+            if s1['section'] != s2['section'] or s1['report'] != s2['report']:
+                raise ValueError(f'Step mismatch at {i}')
+            # Skip result section comparison.
+            if s1['section'] == 'result':
+                continue
+
+            left = s1['report_obj'].get('data')
+            right = s2['report_obj'].get('data')
+            if not ReportJoiner.compare_data(logger, left, right):
+                ck = f'sections.{s1["section"]}.reports.{s1["report"]}.data'
+                if ck in compare_items:
+                    raise ValueError(
+                        f'Required comparison item differs: "{s1["report"]}"\n'
+                        f'reference report - {reference_label}\n'
+                        f'comparable report - {comparison_label}'
+                    )
+                elif diff_target is not None:
+                    target = diff_target['sections'][s1['section']]['reports'][s1['report']]
+                    if target.get('join_comparison'):
+                        target['data'].append([comparison_label, copy.deepcopy(right)])
+                    else:
+                        target['data'] = [
+                            [reference_label, copy.deepcopy(left)],
+                            [comparison_label, copy.deepcopy(right)],
+                        ]
+                        target['join_comparison'] = True
+                        old_header = target.get('header', '')
+                        target['header'] = f'{old_header} | Diff'
+                        if target.get('item_type') != 'table':
+                            target['item_type'] = 'table'
+                            target['theader'] = ['report', 'value']
+        return True
+
+    @staticmethod
+    def _result_reports(report: dict) -> dict:
+        try:
+            result_reports = report['sections']['result']['reports']
+            series = result_reports['chart']['data']['series']
+            outputs = result_reports['pgbench_outputs']['data']
+        except (KeyError, TypeError) as exc:
+            raise ValueError('Report has no complete benchmark result structure') from exc
+        if not isinstance(result_reports, dict):
+            raise ValueError('Result reports must be an object')
+        if not isinstance(series, list) or not series:
+            raise ValueError('Benchmark chart must contain at least one series')
+        if not all(isinstance(item, dict) for item in series):
+            raise ValueError('Every benchmark chart series must be an object')
+        if not isinstance(outputs, list):
+            raise ValueError('pgbench_outputs data must be a list')
+        return result_reports
+
+    @staticmethod
+    def add_result(base: dict, inc: dict, *, source_label: str | None = None) -> None:
+        """
+        Adds performance results from an incremental report into the base report.
+        """
+        base_result = ReportJoiner._result_reports(base)
+        inc_result = ReportJoiner._result_reports(inc)
+        source_label = source_label or inc.get('report_name', 'Unnamed')
+        chart_series = base_result['chart']['data']['series']
+        inc_series = inc_result['chart']['data']['series']
+        for incoming_series in inc_series:
+            series = copy.deepcopy(incoming_series)
+            series['name'] = source_label
+            chart_series.append(series)
+
+        base_outputs = base_result['pgbench_outputs']
+        inc_outputs = inc_result['pgbench_outputs']
+        base_outputs['data'].append([source_label, copy.deepcopy(inc_outputs['data'])])
+
+        base_logs = base_result.get('logs', {})
+        inc_logs = inc_result.get('logs', {})
+
+        if base_logs == {} and inc_logs != {}:
+            base_result['logs'] = {
+                'header': 'database logs',
+                'description': 'Local path to the database log archive',
+                'item_type': 'link',
+                'state': 'collapsed',
+                'python_command': '',
+                'data': [],
+            }
+            base_logs = base_result['logs']
+
+        if isinstance(base_logs.get('data'), str):
+            base_logs['data'] = [[base.get('report_name', 'Unnamed'), base_logs['data']]]
+        if isinstance(base_logs.get('data'), list) and isinstance(inc_logs.get('data'), str):
+            base_logs['data'].append([source_label, inc_logs['data']])
+
+    @staticmethod
+    def merge_reports(
+        logger, names: list[str], reports: list[dict], compare_items: list[str]
+    ) -> dict | None:
+        """
+        Merges multiple reports into one consolidated report.
+        The first report is considered the reference and subsequent reports are compared against it.
+        """
+        if not reports or len(names) != len(reports):
+            logger.error('Report names and report objects are missing or misaligned')
+            return None
+        baseline = reports[0]
+        ref = copy.deepcopy(baseline)
+        if not isinstance(ref, dict):
+            logger.error('Invalid reference report')
+            return None
+        source_labels = [
+            str(report.get('report_name') or name)
+            for name, report in zip(names, reports, strict=True)
+        ]
+        if len(set(source_labels)) != len(source_labels):
+            logger.error('Every joined report must have a unique report_name')
+            return None
+        baseline_schema = baseline.get('artifact_schema_version')
+        for report in reports[1:]:
+            if report.get('artifact_schema_version') != baseline_schema:
+                logger.error('Reports use incompatible artifact_schema_version values')
+                return None
+        try:
+            ref_result = ReportJoiner._result_reports(ref)
+            ref_chart = ref_result['chart']['data']['series']
+            for series in ref_chart:
+                series['name'] = source_labels[0]
+            ref_pgbench = ref_result['pgbench_outputs']
+            ref_pgbench['data'] = [
+                [
+                    source_labels[0],
+                    ref_pgbench.get('data', []),
+                ]
+            ]
+            if 'logs' in ref_result:
+                ref_logs = ref_result['logs']
+                ref_logs['data'] = [
+                    [
+                        source_labels[0],
+                        ref_logs.get('data', ''),
+                    ]
+                ]
+        except ValueError as exc:
+            logger.error(str(exc))
+            return None
+
+        for index, (_name, report) in enumerate(zip(names, reports, strict=True)):
+            if index == 0:
+                continue
+            try:
+                ReportJoiner._result_reports(report)
+                ReportJoiner.compare_reports(
+                    logger,
+                    baseline,
+                    report,
+                    compare_items,
+                    diff_target=ref,
+                    reference_label=source_labels[0],
+                    comparison_label=source_labels[index],
+                )
+            except ValueError as ve:
+                logger.error(f'Comparison failed: {ve}')
+                return None
+            ReportJoiner.add_result(ref, report, source_label=source_labels[index])
+
+        evidence = [
+            {
+                'report_name': label,
+                'benchmark_runs': copy.deepcopy(report.get('benchmark_runs', [])),
+            }
+            for label, report in zip(source_labels, reports, strict=True)
+            if 'benchmark_runs' in report
+        ]
+        if evidence:
+            ref['joined_benchmark_runs'] = evidence
+
+        ref['header'] = f'Result of joined reports {get_datetime_report("%d/%m/%Y %H:%M:%S")}'
+        return ref
+
+    @staticmethod
+    def join_reports(
+        raw_args: dict,
+        join_tasks: str,
+        reference_report: str,
+        input_dir: str,
+        report_name: str,
+        logger,
+    ) -> dict | None:
+        """
+        Main method that joins multiple reports:
+          1. Displays run parameters.
+          2. Loads join tasks items.
+          3. Loads and orders JSON reports from the input directory.
+          4. Merges the reports based on compare items.
+          5. Sets the final report name and description.
+        Returns the joined report or None in case of failure.
+        """
+        if raw_args and isinstance(raw_args, dict):
+            display_user_configuration(raw_args, logger)
+
+        if not join_tasks:
+            logger.error('No join_tasks specified.')
+            return None
+
+        compare_items = ReportJoiner.load_compare_items(logger, join_tasks)
+        if not compare_items:
+            logger.error('No compare_items found.')
+            return None
+
+        tasks_list = '\n'.join(compare_items)
+        logger.info(f'Compare items "{join_tasks}" loaded successfully:\n{tasks_list}')
+
+        loaded = ReportJoiner.load_reports(logger, input_dir, reference_report)
+        if not loaded:
+            logger.error('No reports loaded from input directory.')
+            return None
+
+        names, rpts = loaded
+        logger.info(f'Loaded {len(names)} report(s): {", ".join(names)}')
+        if len(rpts) < 2:
+            logger.error('At least two reports are required for join mode.')
+            return None
+
+        joined = ReportJoiner.merge_reports(logger, names, rpts, compare_items)
+        if not joined:
+            logger.error('Merge of reports failed.')
+            return None
+
+        logger.info('Reports merged successfully.')
+        joined['report_name'] = report_name or f'join_{get_default_report_name()}'
+        joined['join_metadata'] = {
+            'reference_report': names[0],
+            'source_reports': names,
+            'join_task': join_tasks,
+            'comparison_items': list(compare_items),
+        }
+
+        all_names = '\n'.join(names)
+        tasks_path = JOIN_TASKS_PATH / join_tasks
+        try:
+            with open(tasks_path, encoding='utf-8') as tf:
+                tasks_content = tf.read()
+            logger.info('Join tasks file read successfully.')
+        except OSError as e:
+            tasks_content = f'Cannot read tasks: {e}'
+            logger.error(tasks_content)
+
+        joined['description'] = f'\nComparison Reports:\n{all_names}\n\nJoined by:\n{tasks_content}'
+        logger.info('Join reports process completed successfully.')
+        return joined

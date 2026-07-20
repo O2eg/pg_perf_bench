@@ -1,0 +1,764 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>__TITLE__</title>
+  <style id="highlight-theme">__HIGHLIGHT_CSS__</style>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #17111f;
+      --panel: #241a2d;
+      --panel-soft: #2e2239;
+      --line: #463456;
+      --line-strong: #725a87;
+      --text: #f8f0ff;
+      --muted: #d8c8e8;
+      --header: #120c19;
+      --header-fg: #fff7d6;
+      --header-muted: #eadfb7;
+      --input-bg: #1d1526;
+      --button-bg: #2b2035;
+      --button-hover-bg: #392847;
+      --summary-bg: #2a1f34;
+      --section-summary-bg: #3a2748;
+      --section-summary-fg: #fff7d6;
+      --item-summary-bg: #281d32;
+      --item-summary-open-bg: #f3d46b;
+      --item-summary-open-fg: #24152f;
+      --table-head-bg: #342643;
+      --row-alt-bg: #1d1626;
+      --accent: #f3d46b;
+      --accent-soft: #483a1f;
+      --accent-fg: #ffeaa3;
+      --accent-contrast: #24152f;
+      --code-bg: #0d1117;
+      --code-fg: #c9d1d9;
+      --shadow: 0 10px 30px rgb(0 0 0 / 22%);
+    }
+
+    html[data-theme="light"] {
+      color-scheme: light;
+      --bg: #fbf7ff;
+      --panel: #ffffff;
+      --panel-soft: #f4edfb;
+      --line: #dfd2ec;
+      --line-strong: #c9b3df;
+      --text: #2b1d38;
+      --muted: #746286;
+      --header: #ede1f7;
+      --header-fg: #2a1738;
+      --header-muted: #6c5b80;
+      --input-bg: #fffdf7;
+      --button-bg: #fffaf0;
+      --button-hover-bg: #f6ecff;
+      --summary-bg: #f6effc;
+      --section-summary-bg: #eadbf6;
+      --section-summary-fg: #2a1738;
+      --item-summary-bg: #fffaf0;
+      --item-summary-open-bg: #f4cf6a;
+      --item-summary-open-fg: #2a1738;
+      --table-head-bg: #efe2f8;
+      --row-alt-bg: #fffaf0;
+      --accent: #f4cf6a;
+      --accent-soft: #fff0ba;
+      --accent-fg: #62490f;
+      --accent-contrast: #2a1738;
+      --code-bg: #f6f8fa;
+      --code-fg: #24292f;
+      --shadow: 0 10px 30px rgb(70 42 90 / 12%);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, input, select { font: inherit; }
+    a { color: var(--accent-fg); }
+    .shell {
+      width: min(100%, 1480px);
+      margin: 0 auto;
+      padding: 0 28px;
+      transition: padding-left 220ms ease;
+    }
+    @media (min-width: 1180px) {
+      .shell { padding-left: 278px; }
+      body.nav-collapsed .shell { padding-left: 86px; }
+    }
+
+    .app-header {
+      background: var(--header);
+      border-bottom: 1px solid var(--line);
+      color: var(--header-fg);
+    }
+    .app-header .shell { padding-top: 22px; padding-bottom: 20px; }
+    h1 { margin: 0 0 6px; font-size: clamp(22px, 3vw, 30px); line-height: 1.2; }
+    .report-name { color: var(--header-muted); font-size: 17px; font-weight: 650; }
+    .description { max-width: 940px; margin-top: 8px; color: var(--header-muted); white-space: pre-wrap; }
+    .project-links { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; }
+    .project-link { display: inline-flex; align-items: center; gap: 7px; text-decoration: none; }
+    .project-link:hover { text-decoration: underline; }
+    .project-link svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; }
+
+    .report-nav {
+      position: fixed;
+      z-index: 20;
+      inset: 0 auto 0 0;
+      width: 250px;
+      background: var(--panel);
+      border-right: 1px solid var(--line);
+      overflow: auto;
+      transition: width 220ms ease;
+    }
+    .nav-title {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 54px;
+      padding: 12px 13px 12px 18px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+      font-weight: 750;
+    }
+    .nav-toggle { width: 34px; height: 34px; padding: 0; }
+    .nav-toggle::before { content: "‹"; font-size: 24px; }
+    .nav-tree { padding: 12px; }
+    .nav-section { margin-bottom: 14px; }
+    .nav-section > a { color: var(--text); font-weight: 700; }
+    .nav-tree a { display: block; padding: 5px 7px; border-radius: 6px; text-decoration: none; overflow-wrap: anywhere; }
+    .nav-tree a:hover { background: var(--panel-soft); }
+    .nav-items { margin-top: 3px; padding-left: 11px; border-left: 2px solid var(--line); }
+    .nav-items a { color: var(--muted); font-size: 12px; }
+    body.nav-collapsed .report-nav { width: 58px; overflow: hidden; }
+    body.nav-collapsed .nav-title { padding: 10px 12px; }
+    body.nav-collapsed .nav-title-text,
+    body.nav-collapsed .nav-tree { display: none; }
+    body.nav-collapsed .nav-toggle::before { content: "›"; }
+
+    main.shell { padding-top: 18px; padding-bottom: 56px; }
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: end;
+      margin-bottom: 16px;
+      padding: 12px;
+      background: color-mix(in srgb, var(--bg) 88%, transparent);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      backdrop-filter: blur(10px);
+      box-shadow: var(--shadow);
+    }
+    .field { display: grid; gap: 4px; min-width: 170px; color: var(--muted); font-size: 12px; }
+    .field-grow { flex: 1 1 300px; }
+    .input, .select, .button {
+      min-height: 36px;
+      color: var(--text);
+      background: var(--input-bg);
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+    }
+    .input, .select { width: 100%; padding: 7px 9px; }
+    .button { padding: 7px 12px; cursor: pointer; background: var(--button-bg); }
+    .button:hover { background: var(--button-hover-bg); border-color: var(--accent); }
+    .theme-control { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; color: var(--muted); }
+    .filter-summary { margin: -5px 2px 15px; color: var(--muted); font-size: 12px; }
+
+    details.section, details.report-item {
+      overflow: clip;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    details.section { margin-bottom: 16px; }
+    details.report-item { margin: 10px 0; box-shadow: none; }
+    summary { list-style: none; cursor: pointer; }
+    summary::-webkit-details-marker { display: none; }
+    summary::before { content: "›"; display: inline-block; margin-right: 9px; transition: transform 120ms ease; }
+    details[open] > summary::before { transform: rotate(90deg); }
+    .section-summary {
+      padding: 14px 16px;
+      color: var(--section-summary-fg);
+      background: var(--section-summary-bg);
+      font-size: 17px;
+      font-weight: 750;
+    }
+    .section-content { padding: 2px 14px 14px; }
+    .section-description { margin: 12px 2px; color: var(--muted); white-space: pre-wrap; }
+    .item-summary {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 11px 13px;
+      background: var(--item-summary-bg);
+      font-weight: 680;
+    }
+    details.report-item[open] > .item-summary { color: var(--item-summary-open-fg); background: var(--item-summary-open-bg); }
+    .item-summary::before { flex: 0 0 auto; }
+    .item-title { flex: 1; }
+    .badge {
+      padding: 2px 7px;
+      color: var(--muted);
+      background: var(--summary-bg);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 650;
+    }
+    details.report-item[open] .badge { color: var(--item-summary-open-fg); border-color: rgb(36 21 47 / 28%); background: rgb(255 255 255 / 25%); }
+    .item-body { padding: 14px; border-top: 1px solid var(--line); }
+    .item-description { margin: 0 0 12px; color: var(--muted); white-space: pre-wrap; }
+    .comparison-label { margin: 16px 0 7px; color: var(--accent-fg); font-weight: 700; }
+    .comparison-label:first-child { margin-top: 0; }
+    .empty { padding: 18px; color: var(--muted); text-align: center; border: 1px dashed var(--line); border-radius: 8px; }
+    .plain-output {
+      max-height: 620px;
+      margin: 0;
+      padding: 14px;
+      overflow: auto;
+      color: var(--code-fg);
+      background: var(--code-bg);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .table-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin: 0 0 9px; }
+    .table-tools .field { min-width: 120px; }
+    .table-tools .table-search { flex: 1 1 230px; }
+    .table-meta { margin-left: auto; padding-bottom: 8px; color: var(--muted); font-size: 12px; }
+    .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 8px 10px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th:last-child, td:last-child { border-right: 0; }
+    tbody tr:last-child td { border-bottom: 0; }
+    tbody tr:nth-child(even) { background: var(--row-alt-bg); }
+    tbody tr:hover { background: var(--panel-soft); }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      min-width: 100px;
+      color: var(--text);
+      background: var(--table-head-bg);
+      white-space: nowrap;
+    }
+    .sort-button { all: unset; display: flex; gap: 7px; align-items: center; width: 100%; cursor: pointer; }
+    .sort-mark { color: var(--accent-fg); }
+    .cell-value { max-width: 560px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .pagination { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 9px; }
+    .page-label { color: var(--muted); font-size: 12px; }
+
+    .chart { width: 100%; height: 390px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+    .chart-fallback { margin-top: 10px; }
+    .link-list { display: grid; gap: 8px; }
+    .link-card { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-soft); }
+    .link-label { color: var(--muted); font-size: 12px; }
+    .hidden { display: none !important; }
+
+    @media (max-width: 1179px) {
+      .report-nav { display: none; }
+      .shell { padding-left: 18px; padding-right: 18px; }
+    }
+    @media (max-width: 640px) {
+      .shell { padding-left: 10px; padding-right: 10px; }
+      .toolbar { position: static; }
+      .field, .field-grow { flex-basis: 100%; min-width: 100%; }
+      .toolbar .button { flex: 1 1 auto; }
+      .table-meta { width: 100%; margin-left: 0; }
+      .chart { height: 320px; }
+    }
+    @media print {
+      .report-nav, .toolbar, .filter-summary, .pagination, .table-tools { display: none !important; }
+      .shell { width: 100%; padding: 0; }
+      details { break-inside: avoid; }
+      details > * { display: block !important; }
+      .chart { break-inside: avoid; }
+    }
+  </style>
+  <script>__ECHARTS_JS__</script>
+</head>
+<body>
+  <aside class="report-nav" aria-label="Report contents">
+    <div class="nav-title">
+      <span class="nav-title-text">Contents</span>
+      <button id="navToggle" type="button" class="button nav-toggle" aria-label="Collapse contents" title="Collapse contents"></button>
+    </div>
+    <nav id="navTree" class="nav-tree"></nav>
+  </aside>
+
+  <header class="app-header">
+    <div class="shell">
+      <h1 id="reportTitle">__TITLE__</h1>
+      <div id="reportName" class="report-name"></div>
+      <div id="reportDescription" class="description"></div>
+      <div class="project-links" aria-label="Project links">
+        <a class="project-link" href="https://github.com/O2eg/pg_perf_bench" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5h6.5a1 1 0 0 1 1 1V13"></path><path d="M4 2.5h6.5a1 1 0 0 1 1 1v9.5"></path><path d="M4 2.5A1.5 1.5 0 0 0 2.5 4v8A1.5 1.5 0 0 1 4 10.5h8.5"></path></svg>
+          <span>github.com/O2eg/pg_perf_bench</span>
+        </a>
+        <a class="project-link" href="https://t.me/O2egg" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M14 2.5 2 7.4l4.3 1.5"></path><path d="M14 2.5 9.5 13.5 6.3 8.9"></path><path d="M6.3 8.9 10 5.8"></path></svg>
+          <span>t.me/O2egg</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell">
+    <div class="toolbar" aria-label="Report controls">
+      <label class="field field-grow">
+        <span>Find item</span>
+        <input id="itemSearch" class="input" type="search" placeholder="Title, description or identifier">
+      </label>
+      <label class="field">
+        <span>Type</span>
+        <select id="typeFilter" class="select">
+          <option value="">All items</option>
+          <option value="plain_text">Plain text</option>
+          <option value="table">Tables</option>
+          <option value="chart">Charts</option>
+          <option value="link">Links</option>
+        </select>
+      </label>
+      <button id="expandAll" type="button" class="button">Expand all</button>
+      <button id="collapseAll" type="button" class="button">Collapse all</button>
+      <label class="theme-control" title="Switch report theme">
+        <input id="themeToggle" type="checkbox">
+        <span>Light theme</span>
+      </label>
+    </div>
+    <div id="filterSummary" class="filter-summary"></div>
+    <div id="reportContent"></div>
+  </main>
+
+  <script id="pg-perf-bench-report" type="application/json">__PAYLOAD__</script>
+  <script id="pg-perf-bench-third-party-licenses" type="text/plain">__THIRD_PARTY_LICENSES__</script>
+  <script>__HIGHLIGHT_JS__</script>
+  <script>
+    (() => {
+      'use strict';
+
+      const report = JSON.parse(document.getElementById('pg-perf-bench-report').textContent);
+      const content = document.getElementById('reportContent');
+      const navTree = document.getElementById('navTree');
+      const charts = [];
+      let renderedItems = 0;
+
+      const asText = value => {
+        if (value === null || value === undefined) return '';
+        if (typeof value === 'string') return value;
+        if (typeof value === 'object') return JSON.stringify(value, null, 2);
+        return String(value);
+      };
+
+      const slug = value => String(value)
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'item';
+
+      const element = (tag, className, text) => {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      };
+
+      const addLabeledBlock = (parent, label, value) => {
+        if (label) parent.append(element('div', 'comparison-label', label));
+        const pre = element('pre', 'plain-output');
+        const code = element('code', 'language-plaintext', asText(value));
+        pre.append(code);
+        parent.append(pre);
+      };
+
+      const comparisonData = data => (
+        Array.isArray(data)
+        && data.length > 0
+        && data.every(item => Array.isArray(item) && item.length >= 2 && typeof item[0] === 'string')
+      );
+
+      const renderPlainText = (parent, data) => {
+        if (comparisonData(data)) {
+          data.forEach(item => addLabeledBlock(parent, item[0], item[1]));
+        } else {
+          addLabeledBlock(parent, '', data);
+        }
+      };
+
+      const renderLinks = (parent, data) => {
+        const list = element('div', 'link-list');
+        const items = comparisonData(data) ? data : [['', data]];
+        items.forEach(([label, rawUrl]) => {
+          const card = element('div', 'link-card');
+          if (label) card.append(element('div', 'link-label', label));
+          const url = asText(rawUrl);
+          const anchor = element('a', '', url || 'Empty link');
+          if (/^(https?:|file:)/i.test(url)) {
+            anchor.href = url;
+            anchor.target = '_blank';
+            anchor.rel = 'noopener noreferrer';
+          } else {
+            anchor.href = url;
+          }
+          card.append(anchor);
+          list.append(card);
+        });
+        parent.append(list);
+      };
+
+      const compareValues = (left, right) => {
+        const leftNumber = Number(left);
+        const rightNumber = Number(right);
+        if (left !== '' && right !== '' && Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+          return leftNumber - rightNumber;
+        }
+        return asText(left).localeCompare(asText(right), undefined, {numeric: true, sensitivity: 'base'});
+      };
+
+      const renderTable = (parent, headers, rows) => {
+        if (!Array.isArray(rows) || rows.length === 0) {
+          parent.append(element('div', 'empty', 'Empty result'));
+          return;
+        }
+
+        const normalizedRows = rows.map(row => Array.isArray(row) ? row : [row]);
+        const columnCount = Math.max(
+          Array.isArray(headers) ? headers.length : 0,
+          ...normalizedRows.map(row => row.length),
+        );
+        const normalizedHeaders = Array.from(
+          {length: columnCount},
+          (_, index) => (Array.isArray(headers) && headers[index] !== undefined)
+            ? asText(headers[index])
+            : `Column ${index + 1}`,
+        );
+        const state = {query: '', page: 1, pageSize: 25, sortColumn: null, sortDirection: 1};
+        const root = element('div', 'table-view');
+        const tools = element('div', 'table-tools');
+        const searchLabel = element('label', 'field table-search');
+        searchLabel.append(element('span', '', 'Filter rows'));
+        const search = element('input', 'input');
+        search.type = 'search';
+        search.placeholder = 'Search in this table';
+        searchLabel.append(search);
+        tools.append(searchLabel);
+
+        const sizeLabel = element('label', 'field');
+        sizeLabel.append(element('span', '', 'Rows per page'));
+        const size = element('select', 'select');
+        [25, 50, 100, 250].forEach(value => {
+          const option = element('option', '', value);
+          option.value = value;
+          size.append(option);
+        });
+        sizeLabel.append(size);
+        tools.append(sizeLabel);
+        const meta = element('div', 'table-meta');
+        tools.append(meta);
+        root.append(tools);
+
+        const wrap = element('div', 'table-wrap');
+        const table = element('table');
+        const thead = element('thead');
+        const headRow = element('tr');
+        normalizedHeaders.forEach((header, columnIndex) => {
+          const th = element('th');
+          const button = element('button', 'sort-button');
+          button.type = 'button';
+          button.append(element('span', '', header));
+          const mark = element('span', 'sort-mark');
+          button.append(mark);
+          button.addEventListener('click', () => {
+            if (state.sortColumn === columnIndex) state.sortDirection *= -1;
+            else {
+              state.sortColumn = columnIndex;
+              state.sortDirection = 1;
+            }
+            state.page = 1;
+            draw();
+          });
+          th.append(button);
+          headRow.append(th);
+        });
+        thead.append(headRow);
+        table.append(thead);
+        const tbody = element('tbody');
+        table.append(tbody);
+        wrap.append(table);
+        root.append(wrap);
+
+        const pagination = element('div', 'pagination');
+        const previous = element('button', 'button', 'Previous');
+        const pageLabel = element('span', 'page-label');
+        const next = element('button', 'button', 'Next');
+        pagination.append(previous, pageLabel, next);
+        root.append(pagination);
+
+        const draw = () => {
+          const query = state.query.toLowerCase();
+          let visibleRows = normalizedRows.filter(row => !query || row.some(cell => asText(cell).toLowerCase().includes(query)));
+          if (state.sortColumn !== null) {
+            visibleRows = [...visibleRows].sort((left, right) => state.sortDirection * compareValues(left[state.sortColumn], right[state.sortColumn]));
+          }
+          const pages = Math.max(1, Math.ceil(visibleRows.length / state.pageSize));
+          state.page = Math.min(state.page, pages);
+          const first = (state.page - 1) * state.pageSize;
+          const pageRows = visibleRows.slice(first, first + state.pageSize);
+          tbody.replaceChildren();
+          pageRows.forEach(row => {
+            const tr = element('tr');
+            normalizedHeaders.forEach((_, index) => {
+              const td = element('td');
+              td.append(element('div', 'cell-value', asText(row[index])));
+              tr.append(td);
+            });
+            tbody.append(tr);
+          });
+          headRow.querySelectorAll('.sort-mark').forEach((mark, index) => {
+            mark.textContent = state.sortColumn === index ? (state.sortDirection === 1 ? '▲' : '▼') : '';
+          });
+          const shownFrom = visibleRows.length ? first + 1 : 0;
+          const shownTo = Math.min(first + state.pageSize, visibleRows.length);
+          meta.textContent = `${shownFrom}–${shownTo} of ${visibleRows.length} rows`;
+          pageLabel.textContent = `Page ${state.page} of ${pages}`;
+          previous.disabled = state.page <= 1;
+          next.disabled = state.page >= pages;
+        };
+
+        search.addEventListener('input', () => { state.query = search.value; state.page = 1; draw(); });
+        size.addEventListener('change', () => { state.pageSize = Number(size.value); state.page = 1; draw(); });
+        previous.addEventListener('click', () => { state.page -= 1; draw(); });
+        next.addEventListener('click', () => { state.page += 1; draw(); });
+        draw();
+        parent.append(root);
+      };
+
+      const renderTables = (parent, item) => {
+        const data = item.data;
+        const isGrouped = Array.isArray(data)
+          && data.length > 0
+          && Array.isArray(data[0])
+          && typeof data[0][0] === 'string'
+          && Array.isArray(data[0][1]);
+        if (isGrouped) {
+          data.forEach(group => {
+            parent.append(element('div', 'comparison-label', asText(group[0])));
+            renderTable(parent, item.theader, group[1]);
+          });
+        } else {
+          renderTable(parent, item.theader, data);
+        }
+      };
+
+      const chartOption = data => {
+        const dark = document.documentElement.dataset.theme !== 'light';
+        const series = Array.isArray(data && data.series) ? data.series : [];
+        const sourceType = data && data.chart && data.chart.type;
+        return {
+          backgroundColor: 'transparent',
+          color: ['#f3d46b', '#8dd3c7', '#bebada', '#fb8072', '#80b1d3', '#fdb462', '#b3de69'],
+          textStyle: {color: dark ? '#f8f0ff' : '#2b1d38'},
+          title: {
+            text: data && data.title ? asText(data.title.text) : '',
+            left: 'center',
+            textStyle: {color: dark ? '#fff7d6' : '#2a1738', fontSize: 16},
+          },
+          tooltip: {trigger: 'axis', axisPointer: {type: 'cross'}},
+          legend: {
+            type: 'scroll',
+            top: 32,
+            textStyle: {color: dark ? '#d8c8e8' : '#746286'},
+          },
+          toolbox: {
+            right: 12,
+            feature: {dataZoom: {}, restore: {}, saveAsImage: {pixelRatio: 2}},
+          },
+          grid: {left: 64, right: 30, top: 80, bottom: 65, containLabel: true},
+          dataZoom: [{type: 'inside'}, {type: 'slider', bottom: 14}],
+          xAxis: {
+            type: 'value',
+            name: data && data.xaxis && data.xaxis.title ? asText(data.xaxis.title.text) : '',
+            nameLocation: 'middle',
+            nameGap: 32,
+            axisLine: {lineStyle: {color: dark ? '#725a87' : '#c9b3df'}},
+            splitLine: {lineStyle: {color: dark ? '#342643' : '#efe2f8'}},
+          },
+          yAxis: {
+            type: 'value',
+            name: data && data.yaxis && data.yaxis.title ? asText(data.yaxis.title.text) : '',
+            nameLocation: 'middle',
+            nameGap: 48,
+            axisLine: {lineStyle: {color: dark ? '#725a87' : '#c9b3df'}},
+            splitLine: {lineStyle: {color: dark ? '#342643' : '#efe2f8'}},
+          },
+          series: series.map(seriesItem => ({
+            name: asText(seriesItem.name),
+            type: sourceType === 'bar' ? 'bar' : 'line',
+            data: Array.isArray(seriesItem.data) ? seriesItem.data : [],
+            smooth: Boolean(data && data.stroke && data.stroke.curve === 'smooth'),
+            lineStyle: {width: Number(data && data.stroke && data.stroke.width) || 2},
+            symbolSize: 7,
+          })),
+        };
+      };
+
+      const renderChart = (parent, item, ownerDetails) => {
+        if (!window.echarts) {
+          parent.append(element('div', 'empty', 'Embedded ECharts library is unavailable.'));
+          renderPlainText(parent, item.data);
+          return;
+        }
+        const chartNode = element('div', 'chart');
+        parent.append(chartNode);
+        const chart = echarts.init(chartNode, null, {renderer: 'svg'});
+        const refresh = () => {
+          chart.setOption(chartOption(item.data), true);
+          chart.resize();
+        };
+        charts.push({chart, refresh, ownerDetails});
+        if (ownerDetails.open) refresh();
+        ownerDetails.addEventListener('toggle', () => {
+          if (ownerDetails.open) requestAnimationFrame(refresh);
+        });
+      };
+
+      const renderItemBody = (body, item, ownerDetails) => {
+        if (item.description && String(item.description).trim()) {
+          body.append(element('p', 'item-description', asText(item.description)));
+        }
+        switch (item.item_type) {
+          case 'table': renderTables(body, item); break;
+          case 'chart': renderChart(body, item, ownerDetails); break;
+          case 'link': renderLinks(body, item.data); break;
+          default: renderPlainText(body, item.data); break;
+        }
+      };
+
+      const sections = report.sections && typeof report.sections === 'object' ? report.sections : {};
+      Object.entries(sections).forEach(([sectionKey, section], sectionIndex) => {
+        if (!section || section.state === 'hidden') return;
+        const sectionId = `section-${slug(sectionKey)}-${sectionIndex}`;
+        const sectionDetails = element('details', 'section');
+        sectionDetails.id = sectionId;
+        sectionDetails.open = section.state !== 'collapsed';
+        sectionDetails.dataset.search = `${sectionKey} ${asText(section.header)} ${asText(section.description)}`.toLowerCase();
+        const sectionSummary = element('summary', 'section-summary', section.header || sectionKey);
+        sectionDetails.append(sectionSummary);
+        const sectionContent = element('div', 'section-content');
+        if (section.description && String(section.description).trim()) {
+          sectionContent.append(element('p', 'section-description', asText(section.description)));
+        }
+
+        const navSection = element('div', 'nav-section');
+        const navSectionLink = element('a', '', section.header || sectionKey);
+        navSectionLink.href = `#${sectionId}`;
+        navSection.append(navSectionLink);
+        const navItems = element('div', 'nav-items');
+
+        const reports = section.reports && typeof section.reports === 'object' ? section.reports : {};
+        Object.entries(reports).forEach(([reportKey, item], itemIndex) => {
+          if (!item || item.state === 'hidden') return;
+          const itemId = `${sectionId}-item-${slug(reportKey)}-${itemIndex}`;
+          const itemDetails = element('details', 'report-item');
+          itemDetails.id = itemId;
+          itemDetails.open = item.state === 'expanded';
+          itemDetails.dataset.type = item.item_type || 'plain_text';
+          itemDetails.dataset.search = `${sectionKey} ${reportKey} ${asText(item.header)} ${asText(item.description)}`.toLowerCase();
+          const itemSummary = element('summary', 'item-summary');
+          itemSummary.append(element('span', 'item-title', item.header || reportKey));
+          itemSummary.append(element('span', 'badge', item.item_type || 'plain_text'));
+          itemDetails.append(itemSummary);
+          const body = element('div', 'item-body');
+          renderItemBody(body, item, itemDetails);
+          itemDetails.append(body);
+          sectionContent.append(itemDetails);
+          renderedItems += 1;
+
+          const navItemLink = element('a', '', item.header || reportKey);
+          navItemLink.href = `#${itemId}`;
+          navItems.append(navItemLink);
+        });
+
+        if (!sectionContent.querySelector('.report-item')) {
+          sectionContent.append(element('div', 'empty', 'No visible report items'));
+        }
+        sectionDetails.append(sectionContent);
+        content.append(sectionDetails);
+        navSection.append(navItems);
+        navTree.append(navSection);
+      });
+
+      if (!content.children.length) content.append(element('div', 'empty', 'The report has no visible sections.'));
+      document.getElementById('reportTitle').textContent = report.header || report.report_name || 'pg_perf_bench report';
+      document.getElementById('reportName').textContent = report.report_name ? `Report: ${report.report_name}` : '';
+      document.getElementById('reportDescription').textContent = report.description || '';
+
+      const applyFilters = () => {
+        const query = document.getElementById('itemSearch').value.trim().toLowerCase();
+        const type = document.getElementById('typeFilter').value;
+        let visible = 0;
+        document.querySelectorAll('.section').forEach(section => {
+          let sectionVisible = 0;
+          section.querySelectorAll('.report-item').forEach(item => {
+            const matches = (!query || item.dataset.search.includes(query) || section.dataset.search.includes(query))
+              && (!type || item.dataset.type === type);
+            item.classList.toggle('hidden', !matches);
+            if (matches) sectionVisible += 1;
+          });
+          section.classList.toggle('hidden', sectionVisible === 0);
+          if ((query || type) && sectionVisible) section.open = true;
+          visible += sectionVisible;
+        });
+        document.getElementById('filterSummary').textContent = `Showing ${visible} of ${renderedItems} report items`;
+      };
+
+      document.getElementById('itemSearch').addEventListener('input', applyFilters);
+      document.getElementById('typeFilter').addEventListener('change', applyFilters);
+      document.getElementById('expandAll').addEventListener('click', () => {
+        document.querySelectorAll('details:not(.hidden)').forEach(item => { item.open = true; });
+        requestAnimationFrame(() => charts.forEach(item => item.refresh()));
+      });
+      document.getElementById('collapseAll').addEventListener('click', () => {
+        document.querySelectorAll('details').forEach(item => { item.open = false; });
+      });
+
+      const themeToggle = document.getElementById('themeToggle');
+      const savedTheme = localStorage.getItem('pg-perf-bench-report-theme');
+      const initialTheme = savedTheme || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      document.documentElement.dataset.theme = initialTheme;
+      themeToggle.checked = initialTheme === 'light';
+      themeToggle.addEventListener('change', () => {
+        document.documentElement.dataset.theme = themeToggle.checked ? 'light' : 'dark';
+        localStorage.setItem('pg-perf-bench-report-theme', document.documentElement.dataset.theme);
+        charts.forEach(item => item.refresh());
+      });
+
+      document.getElementById('navToggle').addEventListener('click', event => {
+        document.body.classList.toggle('nav-collapsed');
+        const collapsed = document.body.classList.contains('nav-collapsed');
+        event.currentTarget.title = collapsed ? 'Expand contents' : 'Collapse contents';
+        event.currentTarget.setAttribute('aria-label', event.currentTarget.title);
+        setTimeout(() => charts.forEach(item => item.chart.resize()), 240);
+      });
+      window.addEventListener('resize', () => charts.forEach(item => item.chart.resize()));
+      if (window.hljs) document.querySelectorAll('pre code').forEach(node => hljs.highlightElement(node));
+      applyFilters();
+    })();
+  </script>
+</body>
+</html>

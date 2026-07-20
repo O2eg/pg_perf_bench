@@ -1,0 +1,34 @@
+# Runtime output created in the repository root
+/log/
+/report/
+/db_logs/
+
+# Python environments and caches
+/venv/
+/.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Build and release artifacts
+/build/
+/dist/
+
+# Local configuration and editor metadata
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*~

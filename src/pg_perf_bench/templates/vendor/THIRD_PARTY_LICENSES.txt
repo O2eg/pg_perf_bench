@@ -1,0 +1,15 @@
+Third-party software bundled into pg_diag self-contained HTML reports.
+
+Apache ECharts 6.1.0
+Source: https://www.npmjs.com/package/echarts/v/6.1.0
+License: Apache-2.0
+Copyright 2017-2026 The Apache Software Foundation
+The complete Apache-2.0 license, NOTICE, and BSD-3-Clause license for embedded
+d3 components are distributed beside this file and embedded into every HTML
+report.
+
+highlight.js 11.11.1
+Source: https://www.npmjs.com/package/highlight.js/v/11.11.1
+License: BSD-3-Clause
+The complete BSD-3-Clause license is distributed beside this file and embedded
+into every HTML report.
