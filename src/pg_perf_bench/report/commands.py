@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+from pathlib import Path
 
 from pg_perf_bench.const import (
     DEFAULT_LOG_ARCHIVE_NAME,
@@ -34,6 +35,19 @@ def get_script_text(full_script_path) -> str:
 
 async def _run_transport_command(conn, script: str, item: dict) -> str:
     timeout = item.get('timeout_seconds')
+    stripped = script.lstrip()
+    if (
+        getattr(conn, 'collect_system_from_local_host', False) is True
+        and item.get('shell_command_file') != 'pg_config.sh'
+    ):
+        # The Docker container is the database target, not the monitored OS
+        # host.  Local unprivileged lshw is valid JSON and avoids coupling the
+        # report to the distro-specific lshw bundled in each PostgreSQL image.
+        host_script = stripped.removeprefix('sudo -n ')
+        return await conn.run_host_command(host_script, True, timeout=timeout)
+    if stripped.startswith('sudo -n ') and hasattr(conn, 'run_command_as_root'):
+        privileged_script = stripped.removeprefix('sudo -n ')
+        return await conn.run_command_as_root(privileged_script, timeout=timeout)
     if timeout is None:
         return await conn.run_command(script, True)
     return await conn.run_command(script, True, timeout=timeout)
@@ -242,6 +256,21 @@ def workload_parse(report_data, item, phase='workload'):
         item: The item to store results in
         phase: Either 'init' or 'workload' to determine which phase to process
     """
+    evidence = report_data.get('workload_evidence')
+    if isinstance(evidence, dict) and isinstance(evidence.get('files'), list):
+        expected_roles = {'schema', 'generator', 'setup'} if phase == 'init' else {'query'}
+        selected = [
+            source
+            for source in evidence['files']
+            if isinstance(source, dict) and source.get('role') in expected_roles
+        ]
+        item['data'] = '\n\n'.join(
+            f'[{source["role"]}] {source["path"]} ({source["hash"]}):\n{source["content"]}'
+            for source in selected
+        )
+        item['collection_status'] = 'ok' if selected else 'empty'
+        return
+
     # Get command key based on phase
     command_key = 'init_command' if phase == 'init' else 'workload_command'
 
@@ -396,6 +425,7 @@ async def collect_logs(
     connect,
     remote_logs_path,
     report_name: str = DEFAULT_LOG_ARCHIVE_NAME,
+    local_logs_path=LOCAL_DB_LOGS_PATH,
 ):
     # check if remote_logs_path is provided
     if not remote_logs_path:
@@ -404,10 +434,19 @@ async def collect_logs(
         return None
 
     if logger:
-        logger.info(f'Copying logs from {remote_logs_path} -> {LOCAL_DB_LOGS_PATH}/{report_name}')
+        logger.info(f'Copying logs from {remote_logs_path} -> {local_logs_path}/{report_name}')
 
-    data = await connect.copy_db_log_files(remote_logs_path, LOCAL_DB_LOGS_PATH, report_name)
+    data = await connect.copy_db_log_files(remote_logs_path, local_logs_path, report_name)
     if data:
+        archive_path = Path(data)
+        local_path = Path(local_logs_path)
+        try:
+            archive_relative_path = archive_path.resolve().relative_to(local_path.resolve())
+        except ValueError:
+            pass
+        else:
+            # Report links must remain valid when the report directory is moved.
+            data = str(Path(local_path.name) / archive_relative_path)
         report_item = {
             'header': 'database logs',
             'description': 'Local path to the database log archive',

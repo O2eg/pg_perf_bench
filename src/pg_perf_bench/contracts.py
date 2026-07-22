@@ -2,20 +2,48 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 CONTRACT_VERSION = 'pg_play/component/v1'
+CAPABILITY_SCHEMA_VERSION = 'pg_play/capabilities/v1'
+MACHINE_INTERFACE = {
+    'machine_flag': '--machine',
+    'request_id_option': '--request-id',
+    'capabilities_option': '--component-capabilities',
+}
 ARTIFACT_SCHEMA_VERSION = 'pg_perf_bench/report-v1'
 
 EXIT_CODES = {
     'success': 0,
     'validation_error': 2,
     'precondition_failed': 3,
+    'unsupported': 4,
     'partial': 5,
     'execution_error': 6,
     'cancelled': 7,
+    'ownership_error': 8,
 }
+
+
+def canonical_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(',', ':'), sort_keys=True, default=str)
+
+
+def canonical_hash(value: Any) -> str:
+    return 'sha256:' + hashlib.sha256(canonical_json(value).encode('utf-8')).hexdigest()
+
+
+def file_hash(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return 'sha256:' + digest.hexdigest()
+
 
 SECRET_FIELDS = frozenset(
     {

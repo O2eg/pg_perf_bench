@@ -32,3 +32,15 @@ class TestBenchmarkFunctions(unittest.TestCase):
     def test_load_iterations_config_empty(self):
         res = BenchmarkRunner.load_iterations_config({}, {})
         self.assertEqual(res, [])
+
+    def test_maximum_tps_keeps_winning_iteration_and_metrics(self):
+        result = BenchmarkRunner.maximum_tps(
+            [
+                {'iteration': {'value': 1}, 'metrics': {'tps': 10.0, 'latency': 2.0}},
+                {'iteration': {'value': 8}, 'metrics': {'tps': 42.0, 'latency': 4.0}},
+            ]
+        )
+
+        self.assertEqual(result['tps'], 42.0)
+        self.assertEqual(result['iteration']['value'], 8)
+        self.assertEqual(result['metrics']['latency'], 4.0)

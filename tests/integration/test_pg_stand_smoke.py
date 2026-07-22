@@ -70,36 +70,32 @@ def test_pg_stand_benchmark_smoke(tmp_path):
                 '--container-name',
                 container,
                 '--allow-database-reset',
-                '--pg-host',
+                '--host',
                 '127.0.0.1',
-                '--pg-port',
+                '--port',
                 '55432',
-                '--pg-user',
+                '--user',
                 'postgres',
-                '--pg-database',
+                '--database',
                 'pg_perf_bench_it',
                 '--pg-data-path',
-                '/var/lib/postgresql/data',
+                '/var/lib/postgresql/18/docker',
                 '--pg-bin-path',
-                '/usr/lib/postgresql/17/bin',
+                '/usr/lib/postgresql/18/bin',
                 '--benchmark-type',
                 'default',
                 '--pgbench-clients',
                 '1',
-                '--pgbench-path',
-                f'docker exec -e PGPASSWORD {container} pgbench',
-                '--psql-path',
-                f'docker exec -e PGPASSWORD {container} psql',
                 '--init-command',
-                ('ARG_PGBENCH_PATH -i -s 1 -h 127.0.0.1 -p 5432 -U postgres ARG_PG_DATABASE'),
+                ('ARG_PGBENCH_PATH -i -s 1 -h 127.0.0.1 -p 55432 -U postgres ARG_PG_DATABASE'),
                 '--workload-command',
                 (
                     'ARG_PGBENCH_PATH -T 1 -c ARG_PGBENCH_CLIENTS -j 1 '
-                    '-h 127.0.0.1 -p 5432 -U postgres ARG_PG_DATABASE'
+                    '-h 127.0.0.1 -p 55432 -U postgres ARG_PG_DATABASE'
                 ),
                 '--command-timeout',
                 '30',
-                '--output-dir',
+                '--out',
                 report_dir,
                 '--log-dir',
                 tmp_path / 'log',
@@ -114,6 +110,9 @@ def test_pg_stand_benchmark_smoke(tmp_path):
         report_text = (report_dir / 'pg-stand-smoke.json').read_text(encoding='utf-8')
         report = json.loads(report_text)
         assert report['benchmark_runs'][0]['metrics']['tps'] > 0
+        assert report['postgresql_compatibility']['server']['major'] == 18
+        assert report['postgresql_compatibility']['load_generator']['pgbench']['major'] == 18
+        assert report['sections']['os_metrics']['reports']['os_cpu_utilization']['data']
         assert password not in report_text
         _run([pg_stand, '-c', config, 'health'], cwd=stand_root)
     finally:

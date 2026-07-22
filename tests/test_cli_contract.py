@@ -14,16 +14,16 @@ def _benchmark_arguments(database='bench_db'):
         'benchmark',
         '--connection-type',
         'local',
-        '--pg-host',
+        '--host',
         '127.0.0.1',
-        '--pg-port',
+        '--port',
         '5432',
-        '--pg-database',
+        '--database',
         database,
         '--pg-data-path',
         '/tmp/pgdata',
         '--pg-bin-path',
-        '/usr/lib/postgresql/16/bin',
+        '/usr/lib/postgresql/18/bin',
         '--benchmark-type',
         'default',
         '--pgbench-clients',
@@ -59,19 +59,57 @@ def test_collect_db_does_not_require_data_directory():
             'collect-db-info',
             '--connection-type',
             'local',
-            '--pg-host',
+            '--host',
             '127.0.0.1',
-            '--pg-port',
+            '--port',
             '5432',
-            '--pg-database',
+            '--database',
             'postgres',
             '--pg-bin-path',
-            '/usr/lib/postgresql/16/bin',
+            '/usr/lib/postgresql/18/bin',
         ]
     )
     config = build_runtime_config(args)
     assert config.host.pg_data_path is None
     assert config.database.database == 'postgres'
+
+
+def test_database_and_output_options_follow_pg_diag_cli_naming(tmp_path):
+    args = build_parser().parse_args(
+        [
+            'collect-db-info',
+            '--connection-type=local',
+            '--host=127.0.0.1',
+            '--port=5432',
+            '--user=postgres',
+            '--database=postgres',
+            '--password=secret',
+            '--pg-bin-path=/usr/lib/postgresql/18/bin',
+            f'--out={tmp_path}',
+        ]
+    )
+    config = build_runtime_config(args)
+
+    assert config.database.host == '127.0.0.1'
+    assert config.database.port == 5432
+    assert config.database.user == 'postgres'
+    assert config.database.database == 'postgres'
+    assert config.database.password == 'secret'
+    assert config.report_dir == tmp_path
+
+
+def test_join_accepts_an_exact_repeated_report_list():
+    args = build_parser().parse_args(
+        [
+            'join',
+            '--join-task=optimize-db-config',
+            '--report=baseline.json',
+            '--report=tuned.json',
+        ]
+    )
+
+    assert args.input_dir is None
+    assert args.reports == ['baseline.json', 'tuned.json']
 
 
 def test_benchmark_requires_explicit_database_reset_confirmation():
@@ -87,9 +125,14 @@ def test_benchmark_refuses_protected_database_even_when_confirmed():
 
 
 def test_machine_capabilities_is_one_json_document(capsys):
-    assert main(['--machine', 'capabilities']) == 0
+    assert main(['--machine', '--component-capabilities']) == 0
     output = json.loads(capsys.readouterr().out)
     assert output['status'] == 'succeeded'
+    assert output['result']['capability_schema_version'] == 'pg_play/capabilities/v1'
+    assert (
+        output['result']['machine_interface']['capabilities_option'] == '--component-capabilities'
+    )
+    assert output['result']['commands']['benchmark']['accepts_plan_hash'] is True
     assert output['result']['safety']['os_cache_drop_is_opt_in'] is True
 
 
@@ -122,6 +165,77 @@ def test_machine_plan_uses_machine_envelope(capsys):
     output = json.loads(capsys.readouterr().out)
     assert output['status'] == 'succeeded'
     assert output['result']['schema_version'] == 'pg_perf_bench/plan-v1'
+
+
+def test_machine_benchmark_requires_reviewed_plan_hash(capsys):
+    assert main(['--machine', *_benchmark_arguments(), '--allow-database-reset']) == 3
+    output = json.loads(capsys.readouterr().out)
+    assert output['status'] == 'blocked'
+    assert output['error']['code'] == 'precondition_failed'
+
+
+def test_plan_hash_changes_with_custom_workload_content(tmp_path, capsys):
+    workload = tmp_path / 'workload'
+    workload.mkdir()
+    script = workload / 'load.sql'
+    script.write_text('select 1;\n', encoding='utf-8')
+    arguments = [
+        *_benchmark_arguments(),
+        '--allow-database-reset',
+        '--benchmark-type',
+        'custom',
+        '--workload-path',
+        str(workload),
+    ]
+
+    assert main(['--machine', 'plan', *arguments]) == 0
+    first = json.loads(capsys.readouterr().out)['result']['plan_hash']
+    script.write_text('select 2;\n', encoding='utf-8')
+    assert main(['--machine', 'plan', *arguments]) == 0
+    second = json.loads(capsys.readouterr().out)['result']['plan_hash']
+
+    assert first != second
+
+
+def test_plan_hash_does_not_depend_on_runtime_password(monkeypatch, capsys):
+    arguments = [*_benchmark_arguments(), '--allow-database-reset']
+    monkeypatch.setenv('PGPASSWORD', 'first-runtime-secret')
+    assert main(['--machine', 'plan', *arguments]) == 0
+    first = json.loads(capsys.readouterr().out)['result']['plan_hash']
+
+    monkeypatch.setenv('PGPASSWORD', 'rotated-runtime-secret')
+    assert main(['--machine', 'plan', *arguments]) == 0
+    second = json.loads(capsys.readouterr().out)['result']['plan_hash']
+
+    assert first == second
+
+
+def test_machine_artifact_validation_and_summary(tmp_path, capsys):
+    artifact = tmp_path / 'report.json'
+    artifact.write_text(
+        json.dumps(
+            {
+                'artifact_schema_version': 'pg_perf_bench/report-v1',
+                'report_name': 'bench',
+                'sections': {},
+                'benchmark_runs': [
+                    {
+                        'iteration': {'parameter': 'pgbench_clients', 'value': 1},
+                        'metrics': {'tps': 42.5},
+                    }
+                ],
+            }
+        ),
+        encoding='utf-8',
+    )
+
+    assert main(['--machine', 'summarize', str(artifact)]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output['result']['benchmark_run_count'] == 1
+    assert output['result']['iteration_values'] == [1]
+    assert output['result']['tps_values'] == [42.5]
+    assert output['result']['maximum_tps']['tps'] == 42.5
+    assert output['artifacts'][0]['hash'].startswith('sha256:')
 
 
 def test_machine_parse_failure_uses_machine_envelope(capsys):

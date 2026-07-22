@@ -4,11 +4,8 @@ import json
 import os
 from pathlib import Path
 
-from pg_perf_bench.const import (
-    JOIN_TASKS_PATH,
-    get_datetime_report,
-    get_default_report_name,
-)
+from pg_perf_bench.const import get_datetime_report, get_default_report_name
+from pg_perf_bench.join_catalog import load_join_task
 from pg_perf_bench.log import display_user_configuration
 from pg_perf_bench.report.processing import parse_json_in_order
 
@@ -44,25 +41,60 @@ class ReportJoiner:
             idx = files.index(reference_report)
             files[0], files[idx] = files[idx], files[0]
 
+        return ReportJoiner.load_report_paths(
+            logger,
+            [os.path.join(input_dir, name) for name in files],
+            reference_report,
+        )
+
+    @staticmethod
+    def load_report_paths(
+        logger,
+        report_paths: list[str],
+        reference_report: str | None,
+    ) -> tuple[list[str], list[dict]] | None:
+        """Load only explicitly selected reports, preserving deterministic order."""
+        paths = [Path(value).expanduser().resolve() for value in report_paths]
+        if len(paths) != len(set(paths)):
+            logger.error('Duplicate report path supplied.')
+            return None
+        names = [path.name for path in paths]
+        if len(names) != len(set(names)):
+            logger.error('Every explicitly selected report must have a unique file name.')
+            return None
+        ordered = sorted(paths, key=lambda path: (path.name, str(path)))
+        if reference_report:
+            reference = Path(reference_report).expanduser()
+            matches = [
+                path
+                for path in ordered
+                if path == reference.resolve() or path.name == reference.name
+            ]
+            if len(matches) != 1:
+                logger.error(f'Reference report not found or ambiguous: {reference_report}')
+                return None
+            selected = matches[0]
+            ordered.remove(selected)
+            ordered.insert(0, selected)
+
         loaded_names = []
         reports = []
-        for f in files:
-            path = os.path.join(input_dir, f)
+        for path in ordered:
             try:
-                with open(path, encoding='utf-8') as rf:
+                with path.open(encoding='utf-8') as rf:
                     data = json.load(rf)
                     if isinstance(data, dict):
-                        loaded_names.append(f)
+                        loaded_names.append(path.name)
                         reports.append(data)
-                    elif f == reference_report:
-                        logger.error(f'Reference report is not a JSON object: {f}')
+                    elif reference_report and path.name == Path(reference_report).name:
+                        logger.error(f'Reference report is not a JSON object: {path.name}')
                         return None
                     else:
-                        logger.warning(f'Skipping non-object JSON report: {f}')
+                        logger.warning(f'Skipping non-object JSON report: {path.name}')
             except (OSError, json.JSONDecodeError) as e:
-                logger.warning(f'Cannot load {f}: {e}')
-                if f == reference_report:
-                    logger.error(f'Reference report could not be loaded: {f}')
+                logger.warning(f'Cannot load {path.name}: {e}')
+                if reference_report and path.name == Path(reference_report).name:
+                    logger.error(f'Reference report could not be loaded: {path.name}')
                     return None
 
         return (loaded_names, reports) if reports else None
@@ -70,27 +102,12 @@ class ReportJoiner:
     @staticmethod
     def load_compare_items(logger, join_tasks_file: str) -> list[str] | None:
         """
-        Loads the list of items to compare from a join_tasks JSON file.
+        Loads the list of items to compare from a packaged JOIN scenario.
         """
-        if Path(join_tasks_file).name != join_tasks_file:
-            logger.error(f'Unsafe join_tasks name: {join_tasks_file!r}')
-            return None
-        path = JOIN_TASKS_PATH / join_tasks_file
-        if not os.path.isfile(path):
-            logger.error(f'join_tasks not found: {path}')
-            return None
         try:
-            with open(path, encoding='utf-8') as f:
-                data = json.load(f)
-            items = data.get('items')
-            if not isinstance(items, list) or not items:
-                return None
-            if not all(isinstance(item, str) and item.strip() for item in items):
-                logger.error('Every join comparison item must be a non-empty dotted path')
-                return None
-            return items
-        except (OSError, json.JSONDecodeError) as e:
-            logger.error(f'Cannot parse join_tasks: {e}')
+            return list(load_join_task(join_tasks_file)['items'])
+        except (OSError, ValueError) as e:
+            logger.error(str(e))
             return None
 
     @staticmethod
@@ -213,6 +230,28 @@ class ReportJoiner:
         return result_reports
 
     @staticmethod
+    def _maximum_tps(report: dict) -> dict | None:
+        maximum = report.get('maximum_tps')
+        if isinstance(maximum, dict):
+            return copy.deepcopy(maximum)
+        candidates = [
+            run
+            for run in report.get('benchmark_runs', [])
+            if isinstance(run, dict)
+            and isinstance(run.get('metrics'), dict)
+            and isinstance(run['metrics'].get('tps'), (int, float))
+            and not isinstance(run['metrics'].get('tps'), bool)
+        ]
+        if not candidates:
+            return None
+        best = max(candidates, key=lambda run: float(run['metrics']['tps']))
+        return {
+            'tps': best['metrics']['tps'],
+            'iteration': copy.deepcopy(best.get('iteration')),
+            'metrics': copy.deepcopy(best['metrics']),
+        }
+
+    @staticmethod
     def add_result(base: dict, inc: dict, *, source_label: str | None = None) -> None:
         """
         Adds performance results from an incremental report into the base report.
@@ -251,8 +290,100 @@ class ReportJoiner:
             base_logs['data'].append([source_label, inc_logs['data']])
 
     @staticmethod
+    def label_chart_groups(report: dict, source_label: str) -> None:
+        """Attach a source report label to every vertically rendered chart block."""
+        for section in (report.get('sections') or {}).values():
+            if not isinstance(section, dict):
+                continue
+            for item in (section.get('reports') or {}).values():
+                if not isinstance(item, dict) or item.get('item_type') != 'chart_group':
+                    continue
+                for block in item.get('data') or []:
+                    if isinstance(block, dict):
+                        block['report_name'] = source_label
+
+    @staticmethod
+    def add_chart_groups(base: dict, inc: dict, source_label: str) -> None:
+        """Stack pg_diag OS charts instead of converting them to diff tables."""
+        base_sections = base.get('sections') or {}
+        incoming_sections = inc.get('sections') or {}
+        for section_name, base_section in base_sections.items():
+            if not isinstance(base_section, dict):
+                continue
+            incoming_reports = (incoming_sections.get(section_name) or {}).get('reports') or {}
+            for item_name, base_item in (base_section.get('reports') or {}).items():
+                if not isinstance(base_item, dict) or base_item.get('item_type') != 'chart_group':
+                    continue
+                incoming_item = incoming_reports.get(item_name)
+                if (
+                    not isinstance(incoming_item, dict)
+                    or incoming_item.get('item_type') != 'chart_group'
+                ):
+                    raise ValueError(
+                        f'Incoming report is missing compatible chart group '
+                        f'{section_name}.{item_name}'
+                    )
+        for section_name, incoming_section in incoming_sections.items():
+            if not isinstance(incoming_section, dict):
+                continue
+            incoming_reports = incoming_section.get('reports') or {}
+            base_reports = (base_sections.get(section_name) or {}).get('reports') or {}
+            for item_name, incoming_item in incoming_reports.items():
+                if (
+                    not isinstance(incoming_item, dict)
+                    or incoming_item.get('item_type') != 'chart_group'
+                ):
+                    continue
+                target = base_reports.get(item_name)
+                if not isinstance(target, dict) or target.get('item_type') != 'chart_group':
+                    raise ValueError(
+                        f'Joined report is missing compatible chart group '
+                        f'{section_name}.{item_name}'
+                    )
+                for raw_block in incoming_item.get('data') or []:
+                    block = copy.deepcopy(raw_block)
+                    if isinstance(block, dict):
+                        block['report_name'] = source_label
+                    target.setdefault('data', []).append(block)
+
+    @staticmethod
+    def rebase_log_links(report: dict, source_report: Path, destination: Path) -> None:
+        """Make local log links relative to the directory of the joined report."""
+        try:
+            logs = report['sections']['result']['reports']['logs']
+        except (KeyError, TypeError):
+            return
+        if not isinstance(logs, dict) or logs.get('item_type') != 'link':
+            return
+
+        source_directory = source_report.expanduser().resolve().parent
+        destination_directory = destination.expanduser().resolve()
+
+        def rebase(value):
+            if isinstance(value, str) and value:
+                path = Path(value).expanduser()
+                if not path.is_absolute():
+                    path = source_directory / path
+                return os.path.relpath(path.resolve(), destination_directory)
+            if isinstance(value, list):
+                return [
+                    [entry[0], rebase(entry[1]), *entry[2:]]
+                    if isinstance(entry, list) and len(entry) >= 2
+                    else entry
+                    for entry in value
+                ]
+            return value
+
+        logs['data'] = rebase(logs.get('data'))
+
+    @staticmethod
     def merge_reports(
-        logger, names: list[str], reports: list[dict], compare_items: list[str]
+        logger,
+        names: list[str],
+        reports: list[dict],
+        compare_items: list[str],
+        *,
+        raise_on_error: bool = False,
     ) -> dict | None:
         """
         Merges multiple reports into one consolidated report.
@@ -298,6 +429,7 @@ class ReportJoiner:
                         ref_logs.get('data', ''),
                     ]
                 ]
+            ReportJoiner.label_chart_groups(ref, source_labels[0])
         except ValueError as exc:
             logger.error(str(exc))
             return None
@@ -317,9 +449,17 @@ class ReportJoiner:
                     comparison_label=source_labels[index],
                 )
             except ValueError as ve:
-                logger.error(f'Comparison failed: {ve}')
+                message = f'Comparison failed: {ve}'
+                logger.error(message)
+                if raise_on_error:
+                    raise ValueError(message) from ve
                 return None
             ReportJoiner.add_result(ref, report, source_label=source_labels[index])
+            try:
+                ReportJoiner.add_chart_groups(ref, report, source_labels[index])
+            except ValueError as exc:
+                logger.error(str(exc))
+                return None
 
         evidence = [
             {
@@ -331,6 +471,13 @@ class ReportJoiner:
         ]
         if evidence:
             ref['joined_benchmark_runs'] = evidence
+        maximum_tps = []
+        for label, report in zip(source_labels, reports, strict=True):
+            maximum = ReportJoiner._maximum_tps(report)
+            if maximum is not None:
+                maximum_tps.append({'report_name': label, 'maximum_tps': maximum})
+        if maximum_tps:
+            ref['joined_maximum_tps'] = maximum_tps
 
         ref['header'] = f'Result of joined reports {get_datetime_report("%d/%m/%Y %H:%M:%S")}'
         return ref
@@ -343,6 +490,8 @@ class ReportJoiner:
         input_dir: str,
         report_name: str,
         logger,
+        report_paths: list[str] | None = None,
+        raise_on_error: bool = False,
     ) -> dict | None:
         """
         Main method that joins multiple reports:
@@ -360,7 +509,12 @@ class ReportJoiner:
             logger.error('No join_tasks specified.')
             return None
 
-        compare_items = ReportJoiner.load_compare_items(logger, join_tasks)
+        try:
+            task = load_join_task(join_tasks)
+        except (OSError, ValueError) as exc:
+            logger.error(str(exc))
+            return None
+        compare_items = list(task['items'])
         if not compare_items:
             logger.error('No compare_items found.')
             return None
@@ -368,7 +522,11 @@ class ReportJoiner:
         tasks_list = '\n'.join(compare_items)
         logger.info(f'Compare items "{join_tasks}" loaded successfully:\n{tasks_list}')
 
-        loaded = ReportJoiner.load_reports(logger, input_dir, reference_report)
+        loaded = (
+            ReportJoiner.load_report_paths(logger, report_paths, reference_report)
+            if report_paths
+            else ReportJoiner.load_reports(logger, input_dir, reference_report)
+        )
         if not loaded:
             logger.error('No reports loaded from input directory.')
             return None
@@ -379,7 +537,25 @@ class ReportJoiner:
             logger.error('At least two reports are required for join mode.')
             return None
 
-        joined = ReportJoiner.merge_reports(logger, names, rpts, compare_items)
+        output_directory = Path((raw_args or {}).get('output_dir') or 'report')
+        source_paths = (
+            {
+                Path(value).expanduser().resolve().name: Path(value).expanduser().resolve()
+                for value in report_paths
+            }
+            if report_paths
+            else {name: Path(input_dir).expanduser().resolve() / name for name in names}
+        )
+        for name, report in zip(names, rpts, strict=True):
+            ReportJoiner.rebase_log_links(report, source_paths[name], output_directory)
+
+        joined = ReportJoiner.merge_reports(
+            logger,
+            names,
+            rpts,
+            compare_items,
+            raise_on_error=raise_on_error,
+        )
         if not joined:
             logger.error('Merge of reports failed.')
             return None
@@ -389,19 +565,16 @@ class ReportJoiner:
         joined['join_metadata'] = {
             'reference_report': names[0],
             'source_reports': names,
-            'join_task': join_tasks,
+            'join_task': task['id'],
+            'join_task_schema_version': task['schema_version'],
+            'join_task_title': task['title'],
+            'controlled_dimensions': list(task['controlled_dimensions']),
+            'variable_dimensions': list(task['variable_dimensions']),
             'comparison_items': list(compare_items),
         }
 
         all_names = '\n'.join(names)
-        tasks_path = JOIN_TASKS_PATH / join_tasks
-        try:
-            with open(tasks_path, encoding='utf-8') as tf:
-                tasks_content = tf.read()
-            logger.info('Join tasks file read successfully.')
-        except OSError as e:
-            tasks_content = f'Cannot read tasks: {e}'
-            logger.error(tasks_content)
+        tasks_content = json.dumps(task, indent=2, ensure_ascii=False, sort_keys=True)
 
         joined['description'] = f'\nComparison Reports:\n{all_names}\n\nJoined by:\n{tasks_content}'
         logger.info('Join reports process completed successfully.')

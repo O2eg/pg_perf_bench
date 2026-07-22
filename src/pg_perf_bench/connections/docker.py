@@ -13,8 +13,14 @@ from typing import Any
 
 import docker
 
+from pg_perf_bench.executors import run_local_shell
+
 
 class DockerConnection:
+    # PostgreSQL runs in the container, while pg_diag OS charts and static
+    # hardware inventory describe the Docker host that generates the load.
+    collect_system_from_local_host = True
+
     def __init__(
         self,
         conn_params: dict[str, Any],
@@ -126,6 +132,22 @@ class DockerConnection:
             ),
             timeout=deadline + 2.0,
         )
+
+    async def run_host_command(
+        self,
+        cmd: str,
+        check: bool = False,
+        timeout: float | None = None,
+    ) -> str:
+        result = await run_local_shell(
+            cmd,
+            timeout=self.command_timeout if timeout is None else timeout,
+            check=check,
+            env=self.env,
+        )
+        if self.logger and result.stderr.strip():
+            self.logger.debug('Local Docker-host command stderr: %s', result.stderr.strip())
+        return result.stdout
 
     def _run_command_sync(
         self,

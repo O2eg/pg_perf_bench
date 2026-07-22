@@ -22,14 +22,21 @@ __all__ = [
 ]
 
 
-async def collect_db_logs(logger, client, db_conn, report):
+async def collect_db_logs(logger, client, db_conn, report, local_logs_path=None):
     try:
         logger.info('Collection of database logs.')
         log_dir = await db_conn.fetchval('show log_directory')
         if not PurePosixPath(log_dir).is_absolute():
             data_dir = await db_conn.fetchval('show data_directory')
             log_dir = str(PurePosixPath(data_dir) / log_dir)
-        log_report = await collect_logs(logger, client, log_dir, report['report_name'])
+        kwargs = {'local_logs_path': local_logs_path} if local_logs_path is not None else {}
+        log_report = await collect_logs(
+            logger,
+            client,
+            log_dir,
+            report['report_name'],
+            **kwargs,
+        )
         if log_report:
             result_section = report.setdefault('sections', {}).setdefault(
                 'result',

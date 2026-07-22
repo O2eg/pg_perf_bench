@@ -21,7 +21,7 @@ generator all run on the same machine.
 - The invoking account can execute `su - postgres` non-interactively for
   lifecycle operations. In a conventional installation this normally means
   running the benchmark workflow as root in an isolated stand.
-- PostgreSQL is reachable through `--pg-host` and `--pg-port`.
+- PostgreSQL is reachable through `--host` and `--port`.
 
 Collection does not use `pg_ctl` and does not require database-reset
 confirmation.
@@ -41,11 +41,11 @@ Collect host and database facts:
 ```bash
 PGPASSWORD=secret pg-perf-bench collect-all-info \
   --connection-type local \
-  --pg-host 127.0.0.1 \
-  --pg-port 5432 \
-  --pg-user postgres \
-  --pg-database postgres \
-  --pg-bin-path /usr/lib/postgresql/17/bin \
+  --host 127.0.0.1 \
+  --port 5432 \
+  --user postgres \
+  --database postgres \
+  --pg-bin-path /usr/lib/postgresql/18/bin \
   --report-name local-facts
 ```
 
@@ -58,20 +58,18 @@ replace its configuration.
 PGPASSWORD=secret pg-perf-bench benchmark \
   --connection-type local \
   --allow-database-reset \
-  --pg-host 127.0.0.1 \
-  --pg-port 5432 \
-  --pg-user postgres \
-  --pg-database pg_perf_bench_test \
-  --pg-data-path /var/lib/postgresql/17/main \
-  --pg-bin-path /usr/lib/postgresql/17/bin \
+  --host 127.0.0.1 \
+  --port 5432 \
+  --user postgres \
+  --database pg_perf_bench_test \
+  --pg-data-path /var/lib/postgresql/18/main \
+  --pg-bin-path /usr/lib/postgresql/18/bin \
   --benchmark-type default \
   --pgbench-clients 1,4,16 \
-  --pgbench-path /usr/bin/pgbench \
-  --psql-path /usr/bin/psql \
   --init-command 'ARG_PGBENCH_PATH -i -s 10 -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER ARG_PG_DATABASE' \
   --workload-command 'ARG_PGBENCH_PATH -T 60 -c ARG_PGBENCH_CLIENTS -j ARG_PGBENCH_CLIENTS -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER ARG_PG_DATABASE' \
   --command-timeout 120 \
-  --report-name local-pg17
+  --report-name local-pg18
 ```
 
 For every iteration the selected database is dropped and recreated. System

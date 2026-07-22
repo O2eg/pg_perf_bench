@@ -1,0 +1,18 @@
+{
+  "schema_version": "pg_perf_bench/join-task-v1",
+  "id": "compare-postgresql-major",
+  "title": "Compare PostgreSQL major versions",
+  "purpose": "Measure a PostgreSQL major-version change on fixed hardware, OS and workload.",
+  "controlled_dimensions": ["hardware", "operating_system", "workload", "pgbench_parameters"],
+  "variable_dimensions": ["postgresql_version", "postgresql_build", "effective_database_settings"],
+  "items": [
+    "workload_evidence.execution_hash",
+    "benchmark_methodology",
+    "environment_evidence.load_generator_hash",
+    "environment_evidence.system_metrics_collection_scope",
+    "environment_evidence.dimensions.cpu.hash",
+    "environment_evidence.dimensions.memory_capacity.hash",
+    "environment_evidence.dimensions.storage_hardware.hash",
+    "environment_evidence.dimensions.network_hardware.hash"
+  ]
+}

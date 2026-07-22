@@ -16,7 +16,7 @@ class TestDockerConnectionFunctions(unittest.TestCase):
         dummy_args = argparse.Namespace(
             connection_type=ConnectionType.DOCKER,
             container_name='test_container',
-            pg_bin_path='/usr/lib/postgresql/12/bin',
+            pg_bin_path='/usr/lib/postgresql/18/bin',
             remote_pg_host='192.168.1.100',
             remote_pg_port='5432',
             pg_host='127.0.0.1',
@@ -24,7 +24,7 @@ class TestDockerConnectionFunctions(unittest.TestCase):
             pg_user='postgres',
             pg_password='secret',
             pg_database='test_db',
-            pg_data_path='/var/lib/postgresql/12/main',
+            pg_data_path='/var/lib/postgresql/18/docker',
             pgbench_path='/usr/bin/pgbench',
             psql_path='/usr/bin/psql',
             benchmark_type=WorkloadTypes.DEFAULT,
@@ -48,7 +48,7 @@ class TestDockerConnectionFunctions(unittest.TestCase):
         conn_conf = self.context.structured_params['conn_conf']
 
         expected_conn_params = {'container_name': 'test_container'}
-        expected_env = {'ARG_PG_BIN_PATH': '/usr/lib/postgresql/12/bin'}
+        expected_env = {'ARG_PG_BIN_PATH': '/usr/lib/postgresql/18/bin'}
 
         self.assertEqual(
             conn_conf.get('conn_params'),

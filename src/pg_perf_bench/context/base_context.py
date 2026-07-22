@@ -4,7 +4,14 @@ from pg_perf_bench.const import ConnectionType
 
 
 def transform_key(key: str) -> str:
-    return '--' + key.replace('_', '-')
+    canonical = {
+        'pg_host': 'host',
+        'pg_port': 'port',
+        'pg_user': 'user',
+        'pg_password': 'password',
+        'pg_database': 'database',
+    }.get(key, key)
+    return '--' + canonical.replace('_', '-')
 
 
 class BaseContext:

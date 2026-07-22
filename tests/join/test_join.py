@@ -1,24 +1,30 @@
 import json
 import os
 import unittest
+from unittest.mock import patch
 
-from pg_perf_bench.join import JOIN_TASKS_PATH, ReportJoiner
+from pg_perf_bench.join import ReportJoiner
 
 # Define paths for the test reports directory and the dummy join_tasks file
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_REPORTS_DIR = os.path.join(TEST_DIR, 'join_reports')
-TEST_JOIN_TASKS_FILENAME = 'dummy_join_tasks.json'
-TEST_JOIN_TASKS_PATH = os.path.join(JOIN_TASKS_PATH, TEST_JOIN_TASKS_FILENAME)
+TEST_JOIN_TASKS_FILENAME = 'dummy-join-task'
 
 # Create a dummy join_tasks file with a list of compare items
 DUMMY_JOIN_TASKS = {
+    'schema_version': 'pg_perf_bench/join-task-v1',
+    'id': TEST_JOIN_TASKS_FILENAME,
+    'title': 'Test task',
+    'purpose': 'Exercise report joining.',
+    'controlled_dimensions': ['test facts'],
+    'variable_dimensions': ['benchmark results'],
     'items': [
         'sections.system.reports.sysctl_vm.data',
         'sections.system.reports.sysctl_net_ipv4_tcp.data',
         'sections.system.reports.sysctl_net_ipv4_udp.data',
         'sections.system.reports.total_ram.data',
         'sections.db.reports.version_major.data',
-    ]
+    ],
 }
 
 
@@ -42,19 +48,6 @@ logger = MockLogg()
 
 
 class TestReportProcessing(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        """Write a dummy join_tasks file in the test directory."""
-        os.makedirs(JOIN_TASKS_PATH, exist_ok=True)
-        with open(TEST_JOIN_TASKS_PATH, 'w', encoding='utf-8') as f:
-            json.dump(DUMMY_JOIN_TASKS, f)
-
-    @classmethod
-    def tearDownClass(cls):
-        """Remove the dummy join_tasks file after tests are completed."""
-        if os.path.exists(TEST_JOIN_TASKS_PATH):
-            os.remove(TEST_JOIN_TASKS_PATH)
-
     def test_01load_reports_success(self):
         """Verify that load_reports successfully loads JSON reports."""
         reference_report = 'report_1.json'
@@ -78,7 +71,11 @@ class TestReportProcessing(unittest.TestCase):
         """Verify that load_compare_items loads the compare items list."""
         items = ReportJoiner.load_compare_items(logger, 'task_compare_dbs_on_single_host.json')
         self.assertIsInstance(items, list, 'Expected a list of compare items')
-        self.assertEqual(len(items), 12, 'Expected 12 compare items')
+        self.assertIn(
+            'environment_evidence.identity_hash',
+            items,
+            'Expected a stable complete environment identity comparison',
+        )
 
     def test_04load_compare_items_invalid(self):
         """Verify that load_compare_items returns None for a nonexistent file."""
@@ -198,14 +195,15 @@ class TestReportProcessing(unittest.TestCase):
     def test_10_join_reports(self):
         """Test join_reports end-to-end with dummy arguments."""
         raw_args = ''
-        joined_report = ReportJoiner.join_reports(
-            raw_args=raw_args,
-            join_tasks=TEST_JOIN_TASKS_FILENAME,
-            reference_report='report_1.json',
-            input_dir=TEST_REPORTS_DIR,
-            report_name='joined_report',
-            logger=logger,
-        )
+        with patch('pg_perf_bench.join.load_join_task', return_value=DUMMY_JOIN_TASKS):
+            joined_report = ReportJoiner.join_reports(
+                raw_args=raw_args,
+                join_tasks=TEST_JOIN_TASKS_FILENAME,
+                reference_report='report_1.json',
+                input_dir=TEST_REPORTS_DIR,
+                report_name='joined_report',
+                logger=logger,
+            )
         self.assertIsInstance(joined_report, dict, 'Expected join_reports to return a dictionary')
         self.assertEqual(
             joined_report.get('report_name'),

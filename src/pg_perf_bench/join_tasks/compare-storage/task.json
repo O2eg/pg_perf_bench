@@ -1,0 +1,20 @@
+{
+  "schema_version": "pg_perf_bench/join-task-v1",
+  "id": "compare-storage",
+  "title": "Compare storage",
+  "purpose": "Compare maximum TPS across storage devices or layouts with fixed compute, DB configuration and workload.",
+  "controlled_dimensions": ["cpu", "memory", "operating_system_tuning", "database_configuration", "workload", "pgbench_parameters"],
+  "variable_dimensions": ["storage_device", "filesystem", "storage_layout"],
+  "items": [
+    "workload_evidence.execution_hash",
+    "benchmark_methodology",
+    "environment_evidence.load_generator_hash",
+    "environment_evidence.system_metrics_collection_scope",
+    "environment_evidence.dimensions.kernel_os.hash",
+    "environment_evidence.dimensions.cpu.hash",
+    "environment_evidence.dimensions.memory_capacity.hash",
+    "environment_evidence.dimensions.network_hardware.hash",
+    "postgresql_compatibility.server.version_num",
+    "database_configuration_evidence.effective_settings_hash"
+  ]
+}

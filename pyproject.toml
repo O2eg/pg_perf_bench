@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pg-perf-bench"
-version = "0.1.0"
+version = "0.2.0"
 description = "Reproducible PostgreSQL benchmark runner with environment evidence and portable reports"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = [
   "LICENSE",
+  "THIRD_PARTY_NOTICES.md",
   "src/pg_perf_bench/templates/vendor/*LICENSE*",
   "src/pg_perf_bench/templates/vendor/*NOTICE*",
   "src/pg_perf_bench/templates/vendor/THIRD_PARTY_LICENSES.txt",
@@ -24,6 +25,7 @@ dependencies = [
   "asyncpg>=0.29,<1",
   "asyncssh>=2.21,<3",
   "docker>=7.1,<8",
+  "pg-diag>=0.10.3,<1",
   "aenum>=3.1,<4; python_version < '3.11'",
 ]
 
@@ -62,7 +64,12 @@ namespaces = false
 pg_perf_bench = [
   "commands/**/*.sh",
   "commands/**/*.sql",
-  "join_tasks/*.json",
+  "join_tasks/**/*.json",
+  "join_tasks/**/*.md",
+  "workload_profiles/**/*.json",
+  "workload_profiles/**/*.md",
+  "workload_profiles/**/*.py",
+  "workload_profiles/**/*.sql",
   "templates/*.json",
   "templates/*.html",
   "templates/vendor/*",

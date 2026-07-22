@@ -181,7 +181,7 @@ class TestContext(unittest.TestCase):
         args = Args()
         with self.assertRaises(ValueError) as cm:
             _ = Context(args, self.logger)
-        self.assertIn('Parameter "--pg-port" must be specified', str(cm.exception))
+        self.assertIn('Parameter "--port" must be specified', str(cm.exception))
 
 
 class TestCollectInfoContext(unittest.TestCase):

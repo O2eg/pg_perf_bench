@@ -12,6 +12,7 @@ the main CLI workflows. This directory contains focused operational guides.
 | [SSH transport](ssh_mode_usage.md) | PostgreSQL runs on a remote host reached through SSH |
 | [Workload configuration](workload_description.md) | You are defining the init command, measured command, and iteration axis |
 | [Reports and comparisons](logic_building_and_comparing_reports.md) | You are consuming JSON/HTML artifacts or joining benchmark runs |
+| [`pg_play` integration](pg_play-integration.md) | You are invoking the versioned machine contract from an orchestrator |
 
 ## Reading order
 
@@ -25,7 +26,7 @@ For a new benchmark:
 
 ## Conventions
 
-- Examples use PostgreSQL 17 paths; adjust them for the target installation.
+- Examples use PostgreSQL 18 paths; adjust them for the target installation.
 - `PGPASSWORD=secret` is illustrative. Use an appropriate secret-injection
   mechanism and never commit real credentials.
 - `pg_perf_bench_test` always means a dedicated disposable database.

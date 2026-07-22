@@ -1,0 +1,20 @@
+{
+  "schema_version": "pg_perf_bench/join-task-v1",
+  "id": "tune-os-kernel",
+  "title": "Measure OS and kernel tuning",
+  "purpose": "Measure an OS tuning change on the same hardware with fixed PostgreSQL configuration and workload.",
+  "controlled_dimensions": ["hardware", "postgresql_build", "database_configuration", "workload", "pgbench_parameters"],
+  "variable_dimensions": ["kernel_parameters", "network_parameters", "mount_options"],
+  "items": [
+    "workload_evidence.execution_hash",
+    "benchmark_methodology",
+    "environment_evidence.load_generator_hash",
+    "environment_evidence.system_metrics_collection_scope",
+    "environment_evidence.dimensions.cpu.hash",
+    "environment_evidence.dimensions.memory_capacity.hash",
+    "environment_evidence.dimensions.storage_hardware.hash",
+    "environment_evidence.dimensions.network_hardware.hash",
+    "postgresql_compatibility.server.version_num",
+    "database_configuration_evidence.effective_settings_hash"
+  ]
+}

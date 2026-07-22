@@ -34,6 +34,7 @@ ALL_INFO_TEMPLATE_JSON_PATH = REPORT_TEMPLATE_FOLDER / ALL_INFO_TEMPLATE_JSON_NA
 SHELL_COMMANDS_PATH = SOURCE_ROOT_FOLDER / 'commands' / 'bash_commands'
 SQL_COMMANDS_PATH = SOURCE_ROOT_FOLDER / 'commands' / 'sql_commands'
 JOIN_TASKS_PATH = SOURCE_ROOT_FOLDER / 'join_tasks'
+WORKLOAD_PROFILES_PATH = SOURCE_ROOT_FOLDER / 'workload_profiles'
 
 
 def get_datetime_report(format: str = '%d/%m/%Y %H:%M:%S'):

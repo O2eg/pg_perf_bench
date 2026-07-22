@@ -2,6 +2,7 @@
 /log/
 /report/
 /db_logs/
+/.ci-components/
 
 # Python environments and caches
 /venv/

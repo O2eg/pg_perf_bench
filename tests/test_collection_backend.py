@@ -103,3 +103,20 @@ def test_requested_log_collection_failure_is_visible_in_report():
     item = report['sections']['result']['reports']['logs']
     assert item['collection_status'] == 'error'
     assert item['reason'] == 'log directory unavailable'
+
+
+def test_requested_log_collection_uses_report_local_directory(tmp_path):
+    database = MagicMock()
+    database.fetchval = AsyncMock(return_value='/var/lib/postgresql/data/log')
+    client = MagicMock()
+    client.copy_db_log_files = AsyncMock(return_value=str(tmp_path / 'db_logs/test.tar.gz'))
+    report = {'report_name': 'test', 'sections': {}}
+
+    asyncio.run(collect_db_logs(MagicMock(), client, database, report, tmp_path / 'db_logs'))
+
+    client.copy_db_log_files.assert_awaited_once_with(
+        '/var/lib/postgresql/data/log',
+        tmp_path / 'db_logs',
+        'test',
+    )
+    assert report['sections']['result']['reports']['logs']['data'] == 'db_logs/test.tar.gz'

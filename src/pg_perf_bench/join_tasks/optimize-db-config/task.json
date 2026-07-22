@@ -1,0 +1,14 @@
+{
+  "schema_version": "pg_perf_bench/join-task-v1",
+  "id": "optimize-db-config",
+  "title": "Optimize PostgreSQL configuration",
+  "purpose": "Compare maximum TPS for different PostgreSQL settings on the same hardware, OS and workload.",
+  "controlled_dimensions": ["hardware", "operating_system", "postgresql_build", "workload", "pgbench_parameters"],
+  "variable_dimensions": ["database_configuration"],
+  "items": [
+    "workload_evidence.execution_hash",
+    "benchmark_methodology",
+    "environment_evidence.identity_hash",
+    "postgresql_compatibility.server.version_num"
+  ]
+}

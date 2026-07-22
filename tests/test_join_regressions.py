@@ -1,5 +1,7 @@
 import json
+import os
 from copy import deepcopy
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -63,6 +65,11 @@ def test_merge_always_compares_against_unmodified_reference():
         'second',
         'third',
     ]
+    assert [entry['maximum_tps']['tps'] for entry in merged['joined_maximum_tps']] == [
+        10,
+        20,
+        30,
+    ]
 
 
 def test_required_comparison_item_must_exist():
@@ -70,6 +77,20 @@ def test_required_comparison_item_must_exist():
     right = _report('right', 'A', 10)
     with pytest.raises(ValueError, match='Comparison item is missing'):
         ReportJoiner.compare_reports(MagicMock(), left, right, ['sections.db.reports.missing.data'])
+
+
+def test_machine_join_can_surface_the_exact_controlled_dimension_mismatch():
+    left = _report('left', 'A', 10)
+    right = _report('right', 'B', 11)
+
+    with pytest.raises(ValueError, match='Required comparison item differs: sections.db'):
+        ReportJoiner.merge_reports(
+            MagicMock(),
+            ['left.json', 'right.json'],
+            [left, right],
+            ['sections.db.reports.fact.data'],
+            raise_on_error=True,
+        )
 
 
 def test_invalid_explicit_reference_is_not_silently_replaced(tmp_path):
@@ -93,6 +114,23 @@ def test_report_name_containing_join_is_loaded(tmp_path):
 
     assert loaded is not None
     assert loaded[0] == ['contains-join-word.json']
+
+
+def test_explicit_report_paths_do_not_load_unrelated_json(tmp_path):
+    first = tmp_path / 'pg18-baseline.json'
+    second = tmp_path / 'pg18-tuned.json'
+    first.write_text(json.dumps(_report('pg18-baseline', 'A', 10)), encoding='utf-8')
+    second.write_text(json.dumps(_report('pg18-tuned', 'A', 20)), encoding='utf-8')
+    (tmp_path / 'state.json').write_text('{"state": "not-a-report"}', encoding='utf-8')
+
+    loaded = ReportJoiner.load_report_paths(
+        MagicMock(),
+        [str(second), str(first)],
+        first.name,
+    )
+
+    assert loaded is not None
+    assert loaded[0] == [first.name, second.name]
 
 
 def test_merge_rejects_incomplete_result_structure():
@@ -125,3 +163,21 @@ def test_merge_rejects_incompatible_artifact_schema():
         )
         is None
     )
+
+
+def test_join_rebases_report_local_log_links_to_join_directory(tmp_path: Path):
+    source_report = tmp_path / 'source' / 'baseline.json'
+    destination = tmp_path / 'joined'
+    report = _report('baseline', 'A', 10)
+    report['sections']['result']['reports']['logs'] = {
+        'item_type': 'link',
+        'data': 'db_logs/baseline.tar.gz',
+    }
+
+    ReportJoiner.rebase_log_links(report, source_report, destination)
+
+    expected = os.path.relpath(
+        source_report.parent / 'db_logs' / 'baseline.tar.gz',
+        destination,
+    )
+    assert report['sections']['result']['reports']['logs']['data'] == expected

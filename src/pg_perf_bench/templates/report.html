@@ -264,6 +264,9 @@
     .page-label { color: var(--muted); font-size: 12px; }
 
     .chart { width: 100%; height: 390px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+    .chart-stack { display: grid; gap: 18px; }
+    .chart-block { display: grid; gap: 8px; }
+    .chart-meta { color: var(--muted); font-size: 12px; }
     .chart-fallback { margin-top: 10px; }
     .link-list { display: grid; gap: 8px; }
     .link-card { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-soft); }
@@ -569,6 +572,8 @@
         const dark = document.documentElement.dataset.theme !== 'light';
         const series = Array.isArray(data && data.series) ? data.series : [];
         const sourceType = data && data.chart && data.chart.type;
+        const chartKind = data && data.chart && data.chart.kind;
+        const xAxisType = data && data.xaxis && data.xaxis.type === 'datetime' ? 'time' : 'value';
         return {
           backgroundColor: 'transparent',
           color: ['#f3d46b', '#8dd3c7', '#bebada', '#fb8072', '#80b1d3', '#fdb462', '#b3de69'],
@@ -591,7 +596,7 @@
           grid: {left: 64, right: 30, top: 80, bottom: 65, containLabel: true},
           dataZoom: [{type: 'inside'}, {type: 'slider', bottom: 14}],
           xAxis: {
-            type: 'value',
+            type: xAxisType,
             name: data && data.xaxis && data.xaxis.title ? asText(data.xaxis.title.text) : '',
             nameLocation: 'middle',
             nameGap: 32,
@@ -610,30 +615,66 @@
             name: asText(seriesItem.name),
             type: sourceType === 'bar' ? 'bar' : 'line',
             data: Array.isArray(seriesItem.data) ? seriesItem.data : [],
+            stack: chartKind === 'stacked_area' ? 'total' : undefined,
+            areaStyle: chartKind === 'area' || chartKind === 'stacked_area' ? {} : undefined,
+            itemStyle: seriesItem.color ? {color: seriesItem.color} : undefined,
+            lineStyle: {
+              width: Number(data && data.stroke && data.stroke.width) || 2,
+              color: seriesItem.color || undefined,
+            },
             smooth: Boolean(data && data.stroke && data.stroke.curve === 'smooth'),
-            lineStyle: {width: Number(data && data.stroke && data.stroke.width) || 2},
             symbolSize: 7,
+            showSymbol: xAxisType !== 'time',
           })),
         };
       };
 
-      const renderChart = (parent, item, ownerDetails) => {
+      const renderChartData = (parent, data, ownerDetails) => {
         if (!window.echarts) {
           parent.append(element('div', 'empty', 'Embedded ECharts library is unavailable.'));
-          renderPlainText(parent, item.data);
+          renderPlainText(parent, data);
           return;
         }
         const chartNode = element('div', 'chart');
         parent.append(chartNode);
         const chart = echarts.init(chartNode, null, {renderer: 'svg'});
         const refresh = () => {
-          chart.setOption(chartOption(item.data), true);
+          chart.setOption(chartOption(data), true);
           chart.resize();
         };
         charts.push({chart, refresh, ownerDetails});
         if (ownerDetails.open) refresh();
         ownerDetails.addEventListener('toggle', () => {
           if (ownerDetails.open) requestAnimationFrame(refresh);
+        });
+      };
+
+      const renderChart = (parent, item, ownerDetails) => {
+        renderChartData(parent, item.data, ownerDetails);
+      };
+
+      const renderChartGroup = (parent, item, ownerDetails) => {
+        const stack = element('div', 'chart-stack');
+        parent.append(stack);
+        const blocks = Array.isArray(item.data) ? item.data : [];
+        if (!blocks.length) {
+          stack.append(element('div', 'empty', 'No system metric samples were collected.'));
+        }
+        blocks.forEach(block => {
+          const wrapper = element('div', 'chart-block');
+          const iteration = block && block.iteration ? block.iteration : {};
+          const labels = [];
+          if (block && block.report_name) labels.push(`Report: ${asText(block.report_name)}`);
+          if (iteration && iteration.parameter) {
+            labels.push(`${asText(iteration.parameter)}=${asText(iteration.value)}`);
+          }
+          if (block && block.collection_scope) labels.push(asText(block.collection_scope));
+          wrapper.append(element('div', 'comparison-label', labels.join(' | ') || 'Benchmark run'));
+          if (block && Array.isArray(block.errors) && block.errors.length) {
+            wrapper.append(element('div', 'chart-meta', block.errors.map(error => asText(error.message)).join('; ')));
+          }
+          stack.append(wrapper);
+          renderChartData(wrapper, block && block.chart ? block.chart : {}, ownerDetails);
         });
       };
 
@@ -644,6 +685,7 @@
         switch (item.item_type) {
           case 'table': renderTables(body, item); break;
           case 'chart': renderChart(body, item, ownerDetails); break;
+          case 'chart_group': renderChartGroup(body, item, ownerDetails); break;
           case 'link': renderLinks(body, item.data); break;
           default: renderPlainText(body, item.data); break;
         }

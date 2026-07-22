@@ -1,0 +1,15 @@
+{
+  "schema_version": "pg_perf_bench/join-task-v1",
+  "id": "repeatability",
+  "title": "Check repeatability and performance regression",
+  "purpose": "Join nominally identical reruns to estimate noise or detect an unexplained regression.",
+  "controlled_dimensions": ["hardware", "operating_system", "postgresql_build", "database_configuration", "workload", "pgbench_parameters"],
+  "variable_dimensions": ["run_time", "uncontrolled_background_activity"],
+  "items": [
+    "workload_evidence.execution_hash",
+    "benchmark_methodology",
+    "environment_evidence.identity_hash",
+    "postgresql_compatibility.server.version_num",
+    "database_configuration_evidence.effective_settings_hash"
+  ]
+}

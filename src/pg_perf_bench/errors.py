@@ -14,6 +14,10 @@ class ConfigurationError(PgPerfBenchError):
     """The requested run configuration is invalid."""
 
 
+class PreconditionError(PgPerfBenchError):
+    """A reviewed plan or required runtime precondition is missing or stale."""
+
+
 class CollectionError(PgPerfBenchError):
     """Required benchmark evidence could not be collected."""
 

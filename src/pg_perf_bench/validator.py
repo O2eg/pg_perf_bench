@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-from pg_perf_bench.const import (
-    JOIN_TASKS_PATH,
-    REPORT_TEMPLATE_FOLDER,
-    SHELL_COMMANDS_PATH,
-    SQL_COMMANDS_PATH,
-)
+from pg_perf_bench.const import REPORT_TEMPLATE_FOLDER, SHELL_COMMANDS_PATH, SQL_COMMANDS_PATH
+from pg_perf_bench.join_catalog import validate_join_task_catalog
 from pg_perf_bench.report.processing import get_report_structure, parse_json_in_order
+from pg_perf_bench.workloads import validate_workload_profiles
 
 PYTHON_COMMANDS = frozenset(
     {
@@ -54,20 +50,6 @@ def validate_content() -> list[str]:
                     errors.append(f'{location}: missing SQL command {command_value}')
             elif command_value not in PYTHON_COMMANDS:
                 errors.append(f'{location}: unknown Python command {command_value}')
-    join_tasks = sorted(JOIN_TASKS_PATH.glob('*.json'))
-    if not join_tasks:
-        errors.append(f'No join task definitions found in {JOIN_TASKS_PATH}')
-    for task_path in join_tasks:
-        try:
-            task = json.loads(task_path.read_text(encoding='utf-8'))
-        except (OSError, json.JSONDecodeError) as exc:
-            errors.append(f'{task_path}: {exc}')
-            continue
-        items = task.get('items') if isinstance(task, dict) else None
-        if (
-            not isinstance(items, list)
-            or not items
-            or not all(isinstance(item, str) and item.strip() for item in items)
-        ):
-            errors.append(f'{task_path}: items must be a non-empty list of dotted paths')
+    errors.extend(validate_join_task_catalog())
+    errors.extend(validate_workload_profiles())
     return errors

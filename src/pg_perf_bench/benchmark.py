@@ -1,13 +1,20 @@
+import asyncio
 import os
 import platform
 import re
 import sys
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 import asyncpg
 
 from pg_perf_bench import __version__
+from pg_perf_bench.client_tools import (
+    SUPPORTED_SERVER_MAJORS,
+    select_local_clients,
+    server_major_from_version_num,
+)
 from pg_perf_bench.connections import get_connection
 from pg_perf_bench.const import (
     BENCHMARK_TEMPLATE_JSON_PATH,
@@ -15,7 +22,7 @@ from pg_perf_bench.const import (
     get_datetime_report,
     get_default_report_name,
 )
-from pg_perf_bench.contracts import ARTIFACT_SCHEMA_VERSION
+from pg_perf_bench.contracts import ARTIFACT_SCHEMA_VERSION, canonical_hash, file_hash
 from pg_perf_bench.db_operations import (
     DBTasks,
     collect_db_logs,
@@ -26,6 +33,12 @@ from pg_perf_bench.errors import CollectionError
 from pg_perf_bench.log import display_user_configuration
 from pg_perf_bench.report.commands import fill_info_report
 from pg_perf_bench.report.processing import get_report_structure
+from pg_perf_bench.system_metrics import (
+    build_system_metrics_section,
+    collect_system_metrics,
+    infer_pgbench_duration,
+)
+from pg_perf_bench.workloads import build_workload_evidence
 
 
 class BenchmarkRunner:
@@ -34,6 +47,81 @@ class BenchmarkRunner:
     PostgreSQL performance benchmarks and collecting metrics.
     All methods are static since they share no internal state.
     """
+
+    @staticmethod
+    def maximum_tps(benchmark_runs: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Return the complete winning point from a client/load sweep."""
+        candidates = [
+            run
+            for run in benchmark_runs
+            if isinstance(run.get('metrics'), dict)
+            and isinstance(run['metrics'].get('tps'), (int, float))
+            and not isinstance(run['metrics'].get('tps'), bool)
+        ]
+        if not candidates:
+            return None
+        best = max(candidates, key=lambda run: float(run['metrics']['tps']))
+        return {
+            'tps': best['metrics']['tps'],
+            'iteration': deepcopy(best.get('iteration')),
+            'metrics': deepcopy(best['metrics']),
+        }
+
+    @staticmethod
+    def environment_evidence(report: dict[str, Any]) -> dict[str, Any]:
+        """Build stable dimension hashes without volatile usage counters."""
+        system_reports = report['sections']['system']['reports']
+
+        def stable_value(item_name: str) -> Any:
+            value = deepcopy(system_reports[item_name].get('data'))
+            if item_name == 'ip_br_addr' and isinstance(value, str):
+                return re.sub(r'@if\d+', '@if*', value)
+            return value
+
+        dimension_items = {
+            'kernel_os': (
+                'uname_a',
+                'etc_os_release',
+                'sysctl_vm',
+                'sysctl_net_ipv4_tcp',
+                'sysctl_net_ipv4_udp',
+            ),
+            # ``lshw_processor`` includes the instantaneous CPU clock.  It is
+            # useful raw evidence, but it is not hardware identity: frequency
+            # changes naturally with load and power management between runs.
+            'cpu': ('cpu_info',),
+            'memory_capacity': ('total_ram', 'lshw_memory'),
+            'storage_hardware': ('lshw_storage', 'lshw_disk', 'lshw_volume'),
+            # Interface addresses and Docker bridge/veth names are runtime
+            # topology, not hardware identity.  The raw ``ip -br addr`` output
+            # remains in the report for inspection.
+            'network_hardware': ('lshw_network',),
+        }
+        dimensions = {
+            name: {
+                'hash': canonical_hash(
+                    {item_name: stable_value(item_name) for item_name in item_names}
+                ),
+                'items': list(item_names),
+            }
+            for name, item_names in dimension_items.items()
+        }
+        compatibility = report.get('postgresql_compatibility') or {}
+        load_generator = compatibility.get('load_generator') or {}
+        first_run = next(iter(report.get('benchmark_runs') or []), {})
+        collection_scope = (first_run.get('system_metrics') or {}).get('collection_scope')
+        identity = {
+            'dimensions': {name: item['hash'] for name, item in dimensions.items()},
+            'load_generator': load_generator,
+            'system_metrics_collection_scope': collection_scope,
+        }
+        return {
+            'schema_version': 'pg_perf_bench/environment-evidence-v1',
+            'identity_hash': canonical_hash(identity),
+            'dimensions': dimensions,
+            'load_generator_hash': canonical_hash(load_generator),
+            'system_metrics_collection_scope': collection_scope,
+        }
 
     @staticmethod
     def get_pgbench_results(pgbench_output: str) -> list[int | float]:
@@ -215,9 +303,21 @@ class BenchmarkRunner:
         *,
         db_conf: dict[str, Any],
         command_timeout: float,
+        connection_type: str = 'local',
+        connection: Any = None,
+        system_metrics_interval: float = 1.0,
+        system_metrics_duration: float | None = None,
     ) -> dict[str, Any]:
         init_cmd, workload_cmd = load_iteration
         environment = os.environ.copy()
+        environment.update(
+            {
+                'PGHOST': str(db_conf.get('host', '')),
+                'PGPORT': str(db_conf.get('port', '')),
+                'PGUSER': str(db_conf.get('user', '')),
+                'PGDATABASE': str(db_conf.get('database', '')),
+            }
+        )
         password = db_conf.get('password')
         if password:
             environment['PGPASSWORD'] = str(password)
@@ -232,16 +332,43 @@ class BenchmarkRunner:
             secrets=secrets,
         )
         logger.info('Executing pgbench workload command.')
-        workload_result = await run_command_result(
-            logger,
-            workload_cmd,
-            check=True,
-            timeout=command_timeout,
-            env=environment,
-            secrets=secrets,
-        )
+        sampler_task = None
+        if connection is not None:
+            sampling_duration = infer_pgbench_duration(
+                workload_cmd,
+                system_metrics_duration,
+            )
+            sampler_task = asyncio.create_task(
+                collect_system_metrics(
+                    connection_type=connection_type,
+                    connection=connection,
+                    duration_seconds=sampling_duration,
+                    interval_seconds=system_metrics_interval,
+                ),
+                name='pg-perf-bench:system-metrics',
+            )
+        try:
+            workload_result = await run_command_result(
+                logger,
+                workload_cmd,
+                check=True,
+                timeout=command_timeout,
+                env=environment,
+                secrets=secrets,
+            )
+            system_metrics = await sampler_task if sampler_task is not None else None
+        except BaseException:
+            if sampler_task is not None and not sampler_task.done():
+                sampler_task.cancel()
+            if sampler_task is not None:
+                await asyncio.gather(sampler_task, return_exceptions=True)
+            raise
         metrics = BenchmarkRunner.get_pgbench_results(workload_result.stdout)
-        return {
+        if metrics[5] is None:
+            raise CollectionError(
+                'pgbench completed but TPS could not be parsed; raw output is preserved'
+            )
+        result = {
             'init': init_result.as_dict(secrets=secrets),
             'workload': workload_result.as_dict(secrets=secrets),
             'metrics': {
@@ -253,6 +380,48 @@ class BenchmarkRunner:
                 'tps': metrics[5],
             },
             'legacy_metrics': metrics,
+        }
+        if system_metrics is not None:
+            result['system_metrics'] = system_metrics
+        return result
+
+    @staticmethod
+    async def collect_compatibility_evidence(
+        db_conf: dict[str, Any], workload_conf: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Validate server 10-18 and prove that newest clients run locally."""
+        pgbench, psql = select_local_clients(
+            str(workload_conf.get('pgbench_path') or '') or None,
+            str(workload_conf.get('psql_path') or '') or None,
+        )
+        connection_kwargs = {
+            key: value
+            for key, value in db_conf.items()
+            if key not in {'database', 'connect_timeout'}
+        }
+        connection_kwargs['database'] = 'postgres'
+        connection_kwargs['timeout'] = float(db_conf.get('connect_timeout', 5.0))
+        connection = await asyncpg.connect(**connection_kwargs)
+        try:
+            version_num = int(await connection.fetchval('SHOW server_version_num'))
+            version_text = str(await connection.fetchval('SHOW server_version'))
+        finally:
+            await connection.close()
+        server_major = server_major_from_version_num(version_num)
+        return {
+            'schema_version': 'pg_perf_bench/postgresql-compatibility-v1',
+            'supported_server_majors': list(SUPPORTED_SERVER_MAJORS),
+            'server': {
+                'major': server_major,
+                'version_num': version_num,
+                'version': version_text,
+            },
+            'load_generator': {
+                'execution_host': 'pg_perf_bench_local_host',
+                'pgbench': pgbench.as_dict(),
+                'psql': psql.as_dict(),
+                'newest_installed_client_required': True,
+            },
         }
 
     @staticmethod
@@ -317,6 +486,12 @@ class BenchmarkRunner:
                     load_iteration,
                     db_conf=db_conf,
                     command_timeout=float(workload_conf.get('command_timeout', 300.0)),
+                    connection_type=conn_type,
+                    connection=client,
+                    system_metrics_interval=float(
+                        workload_conf.get('system_metrics_interval', 1.0)
+                    ),
+                    system_metrics_duration=workload_conf.get('system_metrics_duration'),
                 )
             )
             iteration_values = workload_conf.get('pgbench_iter_list', [])
@@ -355,7 +530,13 @@ class BenchmarkRunner:
             await fill_info_report(logger, client, db_conn, report_data, report)
             logger.info('Monitoring data collected.')
             if log_conf.get('collect_pg_logs'):
-                await collect_db_logs(logger, client, db_conn, report)
+                await collect_db_logs(
+                    logger,
+                    client,
+                    db_conn,
+                    report,
+                    log_conf.get('db_logs_dir'),
+                )
         finally:
             await db_conn.close()
             logger.info('Monitoring DB connection closed.')
@@ -392,14 +573,30 @@ class BenchmarkRunner:
                 'workload_conf': workload_conf,
                 'report_conf': report_conf,
             }
+            workload_evidence = build_workload_evidence(workload_conf, load_iterations)
+            report_data['workload_evidence'] = workload_evidence
+            report['workload_evidence'] = workload_evidence
             report['benchmark_methodology'] = {
                 'database_recreated_before_each_iteration': True,
                 'os_caches_dropped_before_each_iteration': bool(
                     workload_conf.get('drop_os_caches')
                 ),
+                'workload_definition_hash': workload_evidence['definition_hash'],
+                'workload_execution_hash': workload_evidence['execution_hash'],
+                'system_metrics_engine': 'pg_diag',
+                'system_metrics_collected_during_workload': True,
+                'system_metrics_interval_seconds': float(
+                    workload_conf.get('system_metrics_interval', 1.0)
+                ),
+                'system_metrics_duration_override': workload_conf.get('system_metrics_duration'),
             }
 
             async with connection as client:
+                compatibility = await BenchmarkRunner.collect_compatibility_evidence(
+                    db_conf,
+                    workload_conf,
+                )
+                report['postgresql_compatibility'] = compatibility
                 if workload_conf.get('pg_custom_config'):
                     custom_path = workload_conf['pg_custom_config']
                     db_path = workload_conf.get('pg_data_path', '')
@@ -418,10 +615,26 @@ class BenchmarkRunner:
                 report_data['benchmark_runs'] = benchmark_runs
                 report_data['pgbench_outputs'] = [run['legacy_metrics'] for run in benchmark_runs]
                 report['benchmark_runs'] = benchmark_runs
+                report['maximum_tps'] = BenchmarkRunner.maximum_tps(benchmark_runs)
+                report['sections']['os_metrics'] = build_system_metrics_section(benchmark_runs)
 
                 await BenchmarkRunner.collect_monitoring_metrics(
                     logger, db_conf, report_data, report, log_conf, client
                 )
+                report['environment_evidence'] = BenchmarkRunner.environment_evidence(report)
+                effective_settings = report['sections']['db']['reports']['pg_settings'].get('data')
+                database_evidence = {
+                    'schema_version': 'pg_perf_bench/database-configuration-evidence-v1',
+                    'effective_settings_hash': canonical_hash(effective_settings),
+                }
+                custom_config = workload_conf.get('pg_custom_config')
+                if custom_config:
+                    custom_path = Path(str(custom_config)).expanduser()
+                    database_evidence['supplied_config'] = {
+                        'name': custom_path.name,
+                        'hash': file_hash(custom_path),
+                    }
+                report['database_configuration_evidence'] = database_evidence
 
             logger.info('Benchmarking process completed successfully.')
             return report

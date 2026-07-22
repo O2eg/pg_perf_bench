@@ -7,8 +7,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from pg_perf_bench.const import ConnectionType, WorkloadTypes, WorkMode
+from pg_perf_bench.client_tools import select_local_clients
+from pg_perf_bench.const import (
+    WORKLOAD_PROFILES_PATH,
+    ConnectionType,
+    WorkloadTypes,
+    WorkMode,
+)
 from pg_perf_bench.errors import ConfigurationError
+from pg_perf_bench.workloads import load_workload_profile
 
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 5.0
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 300.0
@@ -151,9 +158,14 @@ class WorkloadConfig:
     iteration_name: str
     iterations: tuple[int, ...]
     workload_path: str | None = None
+    workload_profile: str | None = None
+    workload_scale: float = 1.0
+    workload_duration_seconds: int | None = None
     pg_custom_config: str | None = None
     allow_database_reset: bool = False
     drop_os_caches: bool = False
+    system_metrics_interval: float = 1.0
+    system_metrics_duration: float | None = None
 
     def as_legacy_dict(self, host: HostConfig) -> dict[str, Any]:
         return {
@@ -163,6 +175,9 @@ class WorkloadConfig:
             'psql_path': self.psql_path,
             'benchmark_type': self.benchmark_type,
             'workload_path': self.workload_path,
+            'workload_profile': self.workload_profile,
+            'workload_scale': self.workload_scale,
+            'workload_duration_seconds': self.workload_duration_seconds,
             'init_command': self.init_command,
             'workload_command': self.workload_command,
             'pgbench_iter_name': self.iteration_name,
@@ -170,6 +185,8 @@ class WorkloadConfig:
             'pg_custom_config': self.pg_custom_config,
             'allow_database_reset': self.allow_database_reset,
             'drop_os_caches': self.drop_os_caches,
+            'system_metrics_interval': self.system_metrics_interval,
+            'system_metrics_duration': self.system_metrics_duration,
         }
 
 
@@ -218,10 +235,10 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
     database: DatabaseConfig | None = None
     if needs_database:
         database = DatabaseConfig(
-            host=str(_required(values.get('pg_host'), '--pg-host')),
-            port=_positive_int(_required(values.get('pg_port'), '--pg-port'), '--pg-port'),
-            user=str(_required(values.get('pg_user'), '--pg-user')),
-            database=str(_required(values.get('pg_database'), '--pg-database')),
+            host=str(_required(values.get('pg_host'), '--host')),
+            port=_positive_int(_required(values.get('pg_port'), '--port'), '--port'),
+            user=str(_required(values.get('pg_user'), '--user')),
+            database=str(_required(values.get('pg_database'), '--database')),
             password=values.get('pg_password'),
             connect_timeout=_positive_float(
                 values.get('connect_timeout', DEFAULT_CONNECT_TIMEOUT_SECONDS),
@@ -267,7 +284,7 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
     if mode == WorkMode.BENCHMARK:
         if not values.get('allow_database_reset'):
             raise ConfigurationError(
-                'benchmark recreates --pg-database; pass --allow-database-reset '
+                'benchmark recreates --database; pass --allow-database-reset '
                 'after selecting a dedicated disposable database'
             )
         assert database is not None
@@ -281,13 +298,37 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
             )
         raw_iterations = clients or durations
         iterations = tuple(_positive_int(item, 'pgbench iteration') for item in raw_iterations)
+        profile_id = values.get('workload_profile')
+        profile = load_workload_profile(str(profile_id)) if profile_id else None
+        if profile is not None and durations:
+            raise ConfigurationError(
+                'bundled workload profiles measure maximum TPS with --pgbench-clients'
+            )
+        if profile is not None and values.get('workload_path'):
+            raise ConfigurationError('--workload-path cannot be combined with --workload-profile')
+        workload_duration_seconds = (
+            _positive_int(values['workload_duration_seconds'], '--workload-duration-seconds')
+            if values.get('workload_duration_seconds') is not None
+            else int(profile['benchmark']['default_duration_seconds'])
+            if profile is not None
+            else None
+        )
+        selected_type = values.get('benchmark_type') or (
+            str(WorkloadTypes.CUSTOM) if profile is not None else None
+        )
         try:
             benchmark_type = WorkloadTypes(
-                _required(values.get('benchmark_type'), '--benchmark-type')
+                _required(selected_type, '--benchmark-type or --workload-profile')
             )
         except ValueError as exc:
             raise ConfigurationError('unsupported benchmark type') from exc
-        workload_path = values.get('workload_path')
+        if profile is not None and benchmark_type != WorkloadTypes.CUSTOM:
+            raise ConfigurationError('bundled workload profiles use benchmark type custom')
+        workload_path = (
+            str((WORKLOAD_PROFILES_PATH / str(profile_id)).resolve())
+            if profile is not None
+            else values.get('workload_path')
+        )
         if benchmark_type == WorkloadTypes.CUSTOM:
             _required(workload_path, '--workload-path')
             if not Path(str(workload_path)).expanduser().exists():
@@ -295,18 +336,49 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
         custom_config = values.get('pg_custom_config')
         if custom_config and not Path(str(custom_config)).expanduser().is_file():
             raise ConfigurationError(f'--pg-custom-config does not exist: {custom_config}')
+        pgbench, psql = select_local_clients(
+            values.get('pgbench_path'),
+            values.get('psql_path'),
+        )
         workload = WorkloadConfig(
             benchmark_type=benchmark_type,
-            init_command=str(_required(values.get('init_command'), '--init-command')),
-            workload_command=str(_required(values.get('workload_command'), '--workload-command')),
-            pgbench_path=str(_required(values.get('pgbench_path'), '--pgbench-path')),
-            psql_path=str(_required(values.get('psql_path'), '--psql-path')),
+            init_command=str(
+                _required(
+                    values.get('init_command')
+                    or (profile['benchmark']['init_command'] if profile is not None else None),
+                    '--init-command',
+                )
+            ),
+            workload_command=str(
+                _required(
+                    values.get('workload_command')
+                    or (profile['benchmark']['workload_command'] if profile is not None else None),
+                    '--workload-command',
+                )
+            ),
+            pgbench_path=str(pgbench.path),
+            psql_path=str(psql.path),
             iteration_name='pgbench_clients' if clients else 'pgbench_time',
             iterations=iterations,
             workload_path=workload_path,
+            workload_profile=str(profile_id) if profile_id else None,
+            workload_scale=_positive_float(values.get('workload_scale', 1.0), '--workload-scale'),
+            workload_duration_seconds=workload_duration_seconds,
             pg_custom_config=custom_config,
             allow_database_reset=True,
             drop_os_caches=bool(values.get('drop_os_caches')),
+            system_metrics_interval=_positive_float(
+                values.get('system_metrics_interval', 1.0),
+                '--system-metrics-interval',
+            ),
+            system_metrics_duration=(
+                _positive_float(
+                    values['system_metrics_duration'],
+                    '--system-metrics-duration',
+                )
+                if values.get('system_metrics_duration') is not None
+                else None
+            ),
         )
 
     return RuntimeConfig(

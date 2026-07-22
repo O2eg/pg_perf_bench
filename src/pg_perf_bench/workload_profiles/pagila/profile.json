@@ -1,0 +1,23 @@
+{
+  "schema_version": "pg_perf_bench/workload-profile-v1",
+  "id": "pagila",
+  "title": "Synthetic Pagila OLTP",
+  "description": "Mixed read/write OLTP transactions over a deterministic DVD-rental schema.",
+  "requires_write": true,
+  "default_scale": 1.0,
+  "files": {
+    "schema": ["sql/pagila-schema.sql"],
+    "generators": ["generator.py"],
+    "queries": [
+      "sql/01_select.sql",
+      "sql/02_insert.sql",
+      "sql/03_update.sql",
+      "sql/04_delete.sql"
+    ]
+  },
+  "benchmark": {
+    "default_duration_seconds": 60,
+    "init_command": "ARG_PSQL_PATH -X -v ON_ERROR_STOP=1 -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER -d ARG_PG_DATABASE -f ARG_WORKLOAD_PATH/sql/pagila-schema.sql && PG_PERF_BENCH_PSQL='ARG_PSQL_PATH' python3 ARG_WORKLOAD_PATH/generator.py --scale ARG_WORKLOAD_SCALE && ARG_PSQL_PATH -X -v ON_ERROR_STOP=1 -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER -d ARG_PG_DATABASE -c 'REFRESH MATERIALIZED VIEW pagila.rental_by_category; ANALYZE pagila.customer'",
+    "workload_command": "ARG_PGBENCH_PATH --no-vacuum --client=ARG_PGBENCH_CLIENTS --jobs=ARG_PGBENCH_CLIENTS --time=ARG_WORKLOAD_DURATION_SECONDS --progress=10 -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER -f ARG_WORKLOAD_PATH/sql/01_select.sql -f ARG_WORKLOAD_PATH/sql/02_insert.sql -f ARG_WORKLOAD_PATH/sql/03_update.sql -f ARG_WORKLOAD_PATH/sql/04_delete.sql ARG_PG_DATABASE"
+  }
+}

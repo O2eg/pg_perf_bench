@@ -122,3 +122,41 @@ def test_partly_parseable_tps_marks_chart_partial():
     chart_tps(report_data, chart)
     assert chart['collection_status'] == 'partial'
     assert chart['data']['series'][0]['data'] == [[1, 10.0]]
+
+
+def test_environment_identity_ignores_instantaneous_lshw_cpu_clock():
+    def report(clock_hz):
+        names = {
+            'uname_a': 'Linux test',
+            'etc_os_release': 'NAME=test',
+            'sysctl_vm': 'vm.swappiness = 1',
+            'sysctl_net_ipv4_tcp': 'net.ipv4.tcp_syncookies = 1',
+            'sysctl_net_ipv4_udp': 'net.ipv4.udp_rmem_min = 4096',
+            'cpu_info': 'Architecture: x86_64\nCPU(s): 8',
+            'lshw_processor': [['cpu', 'processor', True, 'test', clock_hz]],
+            'total_ram': 16 * 1024**3,
+            'lshw_memory': [['memory', 'memory', True, 16 * 1024**3]],
+            'lshw_storage': [],
+            'lshw_disk': [],
+            'lshw_volume': [],
+            'ip_br_addr': 'eth0@if12',
+            'lshw_network': [],
+        }
+        return {
+            'sections': {
+                'system': {'reports': {name: {'data': value} for name, value in names.items()}}
+            },
+            'postgresql_compatibility': {'load_generator': {'pgbench': '18.4'}},
+            'benchmark_runs': [{'system_metrics': {'collection_scope': 'remote'}}],
+        }
+
+    first = BenchmarkRunner.environment_evidence(report(1_200_000_000))
+    second_report = report(4_800_000_000)
+    second_report['sections']['system']['reports']['ip_br_addr']['data'] = (
+        'eth0@if99\nbr-changing-docker-id'
+    )
+    second = BenchmarkRunner.environment_evidence(second_report)
+
+    assert first['identity_hash'] == second['identity_hash']
+    assert first['dimensions']['cpu']['items'] == ['cpu_info']
+    assert first['dimensions']['network_hardware']['items'] == ['lshw_network']

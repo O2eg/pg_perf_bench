@@ -10,7 +10,7 @@ into place. JSON and HTML are individually atomic; they are not a two-file
 transaction.
 
 `--report-name` is a base name, not a path. Path separators, `.`/`..`, empty
-names, and NUL bytes are rejected. Select the destination with `--output-dir`.
+names, and NUL bytes are rejected. Select the destination with `--out`.
 
 ## Report metadata
 
@@ -22,8 +22,11 @@ New reports include:
 - report name and collection timestamp;
 - collection summary and item-level statuses.
 
-A benchmark report additionally contains methodology flags and raw
-`benchmark_runs` evidence.
+A benchmark report additionally contains methodology flags, raw
+`benchmark_runs` evidence, complete embedded workload source and hashes, exact
+pgbench parameters, a hash of the effective PostgreSQL settings, explicit
+client/server compatibility evidence, and pg_diag OS samples collected during
+each measured workload window.
 
 ## Item status
 
@@ -55,28 +58,41 @@ pg-perf-bench render \
   --out report/run.html
 ```
 
-## Join task
+## JOIN scenarios
 
-A join task lists dotted report paths that must exist and be equal in every
-source report:
+A JOIN scenario is a documented comparison contract. Its `task.json` lists
+dotted report paths that must exist and be equal in every source report, and
+its `README.md` explains the practical question, controlled dimensions,
+intentional variable and operator workflow:
 
 ```json
 {
-  "description": "Compare runs from one stable environment",
+  "schema_version": "pg_perf_bench/join-task-v1",
+  "id": "scale-cpu",
+  "controlled_dimensions": ["database_configuration", "workload"],
+  "variable_dimensions": ["cpu_capacity"],
   "items": [
-    "sections.system.reports.cpu_info.data",
-    "sections.db.reports.version_major.data",
-    "sections.db.reports.pg_settings.data"
+    "workload_evidence.execution_hash",
+    "database_configuration_evidence.effective_settings_hash"
   ]
 }
 ```
 
-The CLI accepts the file name of a packaged join task. Run
-`pg-perf-bench validate` to verify the packaged task definitions.
+The CLI accepts a packaged scenario id. `pg-perf-bench join-tasks` lists the
+catalog. Available scenarios cover DB
+configuration optimization, CPU and memory scaling, storage comparison,
+OS/kernel tuning, PostgreSQL major-version comparison and strict repeatability.
+Run `pg-perf-bench validate` to verify every task and its README.
 
 Choose comparison items that define the controlled environment. Do not include
 the measured result itself, such as TPS, because that value is expected to
 differ.
+
+Use `environment_evidence.identity_hash` when the complete environment must be
+fixed. Scaling scenarios compare only the relevant dimension hashes and omit
+the intentional variable. These hashes deliberately exclude volatile RAM
+usage, filesystem free-space counters, and report-specific arguments such as
+`report_name`.
 
 ## Join preconditions
 
@@ -97,8 +113,8 @@ operation fails if the explicit reference is missing, invalid, or incompatible.
 pg-perf-bench join \
   --input-dir report/runs \
   --reference-report run-a.json \
-  --join-tasks task_compare_dbs_on_single_host.json \
-  --output-dir report/comparisons \
+  --join-task optimize-db-config \
+  --out report/comparisons \
   --report-name comparison
 ```
 
@@ -108,8 +124,11 @@ incrementally modified result.
 
 The joined artifact contains:
 
-- `join_metadata` with source filenames, reference, task, and required paths;
+- `join_metadata` with source filenames, reference, task schema, controlled and
+  variable dimensions, and required paths;
 - one chart series per source report;
+- vertically stacked CPU, RAM, disk, and network chart blocks per source report
+  and benchmark iteration;
 - grouped pgbench result tables;
 - grouped PostgreSQL log references when available;
 - non-required differences rendered as report/value comparison tables;

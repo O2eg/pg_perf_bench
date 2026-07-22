@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
+import copy
 import json
 import os
 import sys
@@ -27,18 +27,28 @@ from pg_perf_bench.const import (
 )
 from pg_perf_bench.contracts import (
     ARTIFACT_SCHEMA_VERSION,
+    CAPABILITY_SCHEMA_VERSION,
     CONTRACT_VERSION,
     EXIT_CODES,
+    MACHINE_INTERFACE,
+    canonical_hash,
     envelope,
     redact_mapping,
     redact_text,
 )
-from pg_perf_bench.errors import ConfigurationError, PgPerfBenchError
+from pg_perf_bench.errors import ConfigurationError, PgPerfBenchError, PreconditionError
 from pg_perf_bench.join import ReportJoiner
+from pg_perf_bench.join_catalog import join_task_catalog
 from pg_perf_bench.log import setup_logger
+from pg_perf_bench.orchestration import (
+    artifact_descriptor,
+    load_artifact,
+    summarize_artifact,
+)
 from pg_perf_bench.report.html import render_from_json
 from pg_perf_bench.report.processing import save_report
 from pg_perf_bench.validator import validate_content
+from pg_perf_bench.workloads import bundled_profile_names, workload_profile_catalog
 
 
 class CLIArgumentParser(argparse.ArgumentParser):
@@ -80,7 +90,7 @@ def parse_pgbench_options(value: str) -> list[int]:
 
 def _add_service_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--report-name')
-    parser.add_argument('--output-dir', default='report')
+    parser.add_argument('--out', '--output-dir', dest='output_dir', default='report')
     parser.add_argument('--log-dir', default='log')
     parser.add_argument(
         '--log-level',
@@ -115,16 +125,17 @@ def _add_database_args(
     *,
     include_custom_config: bool = False,
 ) -> None:
-    parser.add_argument('--pg-host')
-    parser.add_argument('--pg-port', type=positive_int)
-    parser.add_argument('--pg-user', default='postgres')
+    parser.add_argument('--host', '--pg-host', dest='pg_host')
+    parser.add_argument('--port', '--pg-port', dest='pg_port', type=positive_int)
+    parser.add_argument('--user', '--pg-user', dest='pg_user', default='postgres')
     parser.add_argument(
+        '--password',
         '--pg-password',
         '--pg-user-password',
         dest='pg_password',
         default=os.environ.get('PGPASSWORD'),
     )
-    parser.add_argument('--pg-database')
+    parser.add_argument('--database', '--pg-database', dest='pg_database')
     parser.add_argument('--connect-timeout', type=positive_float, default=5.0)
     parser.add_argument('--collect-pg-logs', action='store_true')
     if include_custom_config:
@@ -161,16 +172,39 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument(
         '--benchmark-type',
         choices=[str(value) for value in WorkloadTypes],
-        required=True,
     )
+    benchmark.add_argument('--workload-profile', choices=bundled_profile_names())
     benchmark.add_argument('--workload-path')
+    benchmark.add_argument('--workload-scale', type=positive_float, default=1.0)
+    benchmark.add_argument(
+        '--workload-duration-seconds',
+        type=positive_int,
+        help='pgbench duration for a bundled profile (defaults to the profile value)',
+    )
     iterations = benchmark.add_mutually_exclusive_group(required=True)
     iterations.add_argument('--pgbench-clients', type=parse_pgbench_options)
     iterations.add_argument('--pgbench-time', type=parse_pgbench_options)
-    benchmark.add_argument('--init-command', required=True)
-    benchmark.add_argument('--workload-command', required=True)
-    benchmark.add_argument('--pgbench-path', required=True)
-    benchmark.add_argument('--psql-path', required=True)
+    benchmark.add_argument('--init-command')
+    benchmark.add_argument('--workload-command')
+    benchmark.add_argument(
+        '--pgbench-path',
+        help='local pgbench executable; defaults to the newest installed version',
+    )
+    benchmark.add_argument(
+        '--psql-path',
+        help='local psql executable; defaults to the version paired with pgbench',
+    )
+    benchmark.add_argument(
+        '--system-metrics-interval',
+        type=positive_float,
+        default=1.0,
+        help='sampling interval for pg_diag CPU, RAM, disk, and network metrics',
+    )
+    benchmark.add_argument(
+        '--system-metrics-duration',
+        type=positive_float,
+        help='sampling window; by default it is inferred from pgbench --time/-T',
+    )
     benchmark.add_argument(
         '--allow-database-reset',
         action='store_true',
@@ -181,6 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
         action='store_true',
         help='drop host filesystem caches between iterations (requires sudo)',
     )
+    benchmark.add_argument('--plan-hash', help=argparse.SUPPRESS)
 
     _add_collect_parser(
         subparsers,
@@ -202,13 +237,32 @@ def build_parser() -> argparse.ArgumentParser:
     _add_service_args(join)
     join.add_argument('--join-tasks', '--join-task', dest='join_tasks', required=True)
     join.add_argument('--reference-report')
-    join.add_argument('--input-dir', required=True)
+    join_inputs = join.add_mutually_exclusive_group(required=True)
+    join_inputs.add_argument('--input-dir')
+    join_inputs.add_argument(
+        '--report',
+        dest='reports',
+        action='append',
+        help='Exact report path; repeat for every report to join',
+    )
 
     render = subparsers.add_parser('render', help='Render portable HTML from report JSON')
     render.add_argument('--from-json', required=True, dest='from_json')
     render.add_argument('--out', required=True)
 
+    validate_artifact = subparsers.add_parser(
+        'validate-artifact', help='Validate a pg_perf_bench JSON artifact'
+    )
+    validate_artifact.add_argument('artifact')
+
+    summarize = subparsers.add_parser(
+        'summarize', help='Print a compact deterministic benchmark summary'
+    )
+    summarize.add_argument('artifact')
+
     subparsers.add_parser('validate', help='Validate packaged report content')
+    subparsers.add_parser('profiles', help='List bundled maximum-TPS workload profiles')
+    subparsers.add_parser('join-tasks', help='List documented JOIN scenarios')
 
     plan = subparsers.add_parser('plan', help='Build a deterministic execution plan')
     plan.add_argument('planned_command', choices=[str(mode) for mode in WorkMode])
@@ -260,19 +314,66 @@ def _legacy_argv(argv: list[str]) -> list[str]:
 
 def capabilities() -> dict[str, Any]:
     return {
+        'capability_schema_version': CAPABILITY_SCHEMA_VERSION,
+        'machine_interface': MACHINE_INTERFACE,
         'contract_version': CONTRACT_VERSION,
         'component': 'pg_perf_bench',
         'component_version': __version__,
         'artifact_schema_versions': [ARTIFACT_SCHEMA_VERSION],
         'commands': {
-            'benchmark': {'mutates_target': True, 'machine_output': True},
-            'collect-sys-info': {'mutates_target': False, 'machine_output': True},
-            'collect-db-info': {'mutates_target': False, 'machine_output': True},
-            'collect-all-info': {'mutates_target': False, 'machine_output': True},
-            'join': {'mutates_target': False, 'machine_output': True},
-            'render': {'mutates_target': False, 'machine_output': True},
-            'validate': {'mutates_target': False, 'machine_output': True},
-            'plan': {'mutates_target': False, 'machine_output': True},
+            'capabilities': {
+                'mutates_target': False,
+                'machine_output': True,
+                'accepts_plan_hash': False,
+            },
+            'benchmark': {
+                'mutates_target': True,
+                'machine_output': True,
+                'accepts_plan_hash': True,
+            },
+            'collect-sys-info': {
+                'mutates_target': False,
+                'machine_output': True,
+                'accepts_plan_hash': False,
+            },
+            'collect-db-info': {
+                'mutates_target': False,
+                'machine_output': True,
+                'accepts_plan_hash': False,
+            },
+            'collect-all-info': {
+                'mutates_target': False,
+                'machine_output': True,
+                'accepts_plan_hash': False,
+            },
+            'join': {'mutates_target': False, 'machine_output': True, 'accepts_plan_hash': False},
+            'render': {'mutates_target': False, 'machine_output': True, 'accepts_plan_hash': False},
+            'validate': {
+                'mutates_target': False,
+                'machine_output': True,
+                'accepts_plan_hash': False,
+            },
+            'validate-artifact': {
+                'mutates_target': False,
+                'machine_output': True,
+                'accepts_plan_hash': False,
+            },
+            'profiles': {
+                'mutates_target': False,
+                'machine_output': True,
+                'accepts_plan_hash': False,
+            },
+            'join-tasks': {
+                'mutates_target': False,
+                'machine_output': True,
+                'accepts_plan_hash': False,
+            },
+            'summarize': {
+                'mutates_target': False,
+                'machine_output': True,
+                'accepts_plan_hash': False,
+            },
+            'plan': {'mutates_target': False, 'machine_output': True, 'accepts_plan_hash': False},
         },
         'exit_codes': EXIT_CODES,
         'secret_policy': {
@@ -285,7 +386,37 @@ def capabilities() -> dict[str, Any]:
             'os_cache_drop_is_opt_in': True,
             'collection_queries_are_read_only': True,
         },
+        'benchmark_compatibility': {
+            'postgresql_server_majors': list(range(10, 19)),
+            'load_generator': 'newest_local_pgbench',
+            'system_metrics_engine': 'pg_diag',
+            'system_metric_families': ['cpu', 'memory', 'disk', 'network'],
+            'joined_os_chart_layout': 'vertical_by_report_and_iteration',
+        },
     }
+
+
+def _input_descriptor(path_value: str | None) -> dict[str, Any] | None:
+    if not path_value:
+        return None
+    path = Path(path_value).expanduser().resolve()
+    if path.is_file():
+        return artifact_descriptor(path, kind='PlanInput', schema_version=None)
+    if not path.is_dir():
+        raise ConfigurationError(f'plan input does not exist: {path}')
+    files = []
+    for candidate in sorted(path.rglob('*')):
+        if not candidate.is_file():
+            continue
+        resolved = candidate.resolve()
+        try:
+            relative = resolved.relative_to(path)
+        except ValueError as exc:
+            raise ConfigurationError(f'plan input escapes workload root: {candidate}') from exc
+        descriptor = artifact_descriptor(resolved, kind='PlanInput', schema_version=None)
+        descriptor['path'] = relative.as_posix()
+        files.append(descriptor)
+    return {'kind': 'PlanInputTree', 'path': str(path), 'files': files}
 
 
 def _runtime_plan(config: RuntimeConfig) -> dict[str, Any]:
@@ -298,11 +429,40 @@ def _runtime_plan(config: RuntimeConfig) -> dict[str, Any]:
         if config.host.ssh_known_hosts:
             document['host']['ssh_known_hosts'] = str(config.host.ssh_known_hosts)
     document['report_dir'] = str(config.report_dir)
-    payload = json.dumps(document, sort_keys=True, separators=(',', ':'), default=str)
+    stable = copy.deepcopy(document)
+    stable.pop('report_name', None)
+    stable.pop('report_dir', None)
+    database = stable.get('database')
+    if isinstance(database, dict):
+        database.pop('password', None)
+    raw_args = stable.get('raw_args')
+    if isinstance(raw_args, dict):
+        for name in (
+            'clear_logs',
+            'component_capabilities',
+            'log_dir',
+            'log_level',
+            'machine',
+            'output_dir',
+            'plan_hash',
+            'pg_password',
+            'report_name',
+            'request_id',
+        ):
+            raw_args.pop(name, None)
+    evidence = {
+        'workload_path': _input_descriptor(
+            config.workload.workload_path if config.workload is not None else None
+        ),
+        'postgresql_config': _input_descriptor(
+            config.workload.pg_custom_config if config.workload is not None else None
+        ),
+    }
     return {
         'schema_version': 'pg_perf_bench/plan-v1',
-        'plan_hash': 'sha256:' + hashlib.sha256(payload.encode()).hexdigest(),
+        'plan_hash': canonical_hash({'configuration': stable, 'inputs': evidence}),
         'configuration': document,
+        'inputs': evidence,
     }
 
 
@@ -317,6 +477,8 @@ async def execute_namespace(args: argparse.Namespace, logger) -> dict[str, Any] 
             input_dir=args.input_dir,
             report_name=config.report_name,
             logger=logger,
+            report_paths=args.reports,
+            raise_on_error=True,
         )
         if report is None:
             raise PgPerfBenchError('Reports could not be joined')
@@ -331,6 +493,7 @@ async def execute_namespace(args: argparse.Namespace, logger) -> dict[str, Any] 
         'collect_pg_logs': config.collect_pg_logs,
         'clear_logs': bool(getattr(args, 'clear_logs', False)),
         'log_level': getattr(args, 'log_level', str(LogLevel.INFO)),
+        'db_logs_dir': config.report_dir / 'db_logs',
     }
     if config.mode == WorkMode.BENCHMARK:
         assert config.database is not None and config.workload is not None
@@ -437,9 +600,13 @@ def _fallback_namespace(argv: list[str]) -> argparse.Namespace:
             command = argv[index + 1]
         elif argument in {str(mode) for mode in WorkMode} | {
             'render',
+            'summarize',
             'validate',
+            'validate-artifact',
             'plan',
             'capabilities',
+            'profiles',
+            'join-tasks',
         }:
             command = argument
     return argparse.Namespace(
@@ -474,7 +641,11 @@ def main(argv: list[str] | None = None) -> int:
                     _emit_machine(
                         args,
                         'failed',
-                        error={'code': 'validation_error', 'details': errors},
+                        error={
+                            'code': 'validation_error',
+                            'message': 'packaged report content is invalid',
+                            'details': errors,
+                        },
                     )
                 else:
                     for error in errors:
@@ -485,11 +656,50 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print('OK')
             return EXIT_CODES['success']
-        if args.command == 'render':
-            render_from_json(args.from_json, args.out)
-            result = {'html': str(Path(args.out).resolve())}
+        if args.command == 'profiles':
+            result = workload_profile_catalog()
             if args.machine:
                 _emit_machine(args, 'succeeded', result=result)
+            else:
+                print(json.dumps(result, indent=2, sort_keys=True))
+            return EXIT_CODES['success']
+        if args.command == 'join-tasks':
+            result = {
+                'schema_version': 'pg_perf_bench/join-task-catalog-v1',
+                'tasks': join_task_catalog(),
+            }
+            if args.machine:
+                _emit_machine(args, 'succeeded', result=result)
+            else:
+                print(json.dumps(result, indent=2, sort_keys=True))
+            return EXIT_CODES['success']
+        if args.command in {'validate-artifact', 'summarize'}:
+            artifact = load_artifact(args.artifact)
+            descriptor = artifact_descriptor(
+                args.artifact,
+                kind='BenchmarkReport',
+                schema_version=ARTIFACT_SCHEMA_VERSION,
+            )
+            result = (
+                {'valid': True, 'artifact_hash': descriptor['hash']}
+                if args.command == 'validate-artifact'
+                else summarize_artifact(artifact)
+            )
+            if args.machine:
+                _emit_machine(args, 'succeeded', result=result, artifacts=[descriptor])
+            else:
+                print(json.dumps(result, indent=2, sort_keys=True, default=str))
+            return EXIT_CODES['success']
+        if args.command == 'render':
+            render_from_json(args.from_json, args.out)
+            descriptor = artifact_descriptor(
+                args.out,
+                kind='BenchmarkReportHtml',
+                schema_version=None,
+            )
+            result = {'html': descriptor['path']}
+            if args.machine:
+                _emit_machine(args, 'succeeded', result=result, artifacts=[descriptor])
             else:
                 print(f'Wrote {args.out}')
             return EXIT_CODES['success']
@@ -501,6 +711,16 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(json.dumps(result, indent=2, sort_keys=True, default=str))
             return EXIT_CODES['success']
+
+        if args.command == str(WorkMode.BENCHMARK) and (args.machine or args.plan_hash):
+            if not args.plan_hash:
+                raise PreconditionError('machine benchmark requires --plan-hash from plan')
+            current_plan = _runtime_plan(build_runtime_config(args))
+            if args.plan_hash != current_plan['plan_hash']:
+                raise PreconditionError(
+                    f'stale benchmark plan: expected {args.plan_hash}, '
+                    f'current plan is {current_plan["plan_hash"]}'
+                )
 
         logger = setup_logger(
             args.log_level,
@@ -522,14 +742,22 @@ def main(argv: list[str] | None = None) -> int:
             'status': 'partial' if warnings else 'succeeded',
             'warning_count': len(warnings),
         }
-        artifacts = save_report(logger, report, str(config.report_dir))
-        result = {'report_name': report['report_name'], 'artifacts': artifacts}
+        artifact_paths = save_report(logger, report, str(config.report_dir))
+        artifacts = [
+            artifact_descriptor(
+                path,
+                kind='BenchmarkReport' if kind == 'json' else 'BenchmarkReportHtml',
+                schema_version=ARTIFACT_SCHEMA_VERSION if kind == 'json' else None,
+            )
+            for kind, path in sorted(artifact_paths.items())
+        ]
+        result = {'report_name': report['report_name'], 'outputs': artifacts}
         if args.machine:
             _emit_machine(
                 args,
                 'partial' if warnings else 'succeeded',
                 result=result,
-                artifacts=[{'kind': kind, 'path': path} for kind, path in artifacts.items()],
+                artifacts=artifacts,
                 warnings=warnings,
             )
         return EXIT_CODES['partial'] if warnings else EXIT_CODES['success']
@@ -540,6 +768,17 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f'ERROR: {message}', file=sys.stderr)
         return EXIT_CODES['validation_error']
+    except PreconditionError as exc:
+        message = _safe_error_message(args, exc)
+        if getattr(args, 'machine', False):
+            _emit_machine(
+                args,
+                'blocked',
+                error={'code': 'precondition_failed', 'message': message},
+            )
+        else:
+            print(f'ERROR: {message}', file=sys.stderr)
+        return EXIT_CODES['precondition_failed']
     except (FileNotFoundError, PermissionError, ConnectionError) as exc:
         message = _safe_error_message(args, exc)
         if getattr(args, 'machine', False):
@@ -559,6 +798,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f'ERROR: {message}', file=sys.stderr)
         return EXIT_CODES['execution_error']
     except KeyboardInterrupt:
+        if getattr(args, 'machine', False):
+            _emit_machine(
+                args,
+                'cancelled',
+                error={'code': 'cancelled', 'message': 'interrupted'},
+            )
+            return EXIT_CODES['cancelled']
         print('Interrupted', file=sys.stderr)
         return 130
     except Exception as exc:

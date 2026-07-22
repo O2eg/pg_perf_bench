@@ -12,6 +12,7 @@ uses AsyncSSH and native local port forwarding; `sshtunnel` and server-side
 | PostgreSQL connection | local forwarded port |
 | `pgbench` and `psql` | local workload-generator host |
 | Host fact collectors | remote host |
+| Timed `pg_diag` OS sampler | remote host |
 | `pg_ctl` lifecycle | remote host as `--ssh-user` |
 | Filesystem sync and optional cache drop | remote host |
 
@@ -37,7 +38,7 @@ disposable stands.
 
 SSH database modes use two address pairs:
 
-- `--pg-host` and `--pg-port` define a free local bind address and port;
+- `--host` and `--port` define a free local bind address and port;
 - `--remote-pg-host` and `--remote-pg-port` identify PostgreSQL as seen from
   the SSH server.
 
@@ -55,11 +56,11 @@ PGPASSWORD=secret pg-perf-bench collect-all-info \
   --ssh-known-hosts ~/.ssh/known_hosts \
   --remote-pg-host 127.0.0.1 \
   --remote-pg-port 5432 \
-  --pg-host 127.0.0.1 \
-  --pg-port 55432 \
-  --pg-user postgres \
-  --pg-database postgres \
-  --pg-bin-path /usr/lib/postgresql/17/bin \
+  --host 127.0.0.1 \
+  --port 55432 \
+  --user postgres \
+  --database postgres \
+  --pg-bin-path /usr/lib/postgresql/18/bin \
   --report-name ssh-facts
 ```
 
@@ -78,21 +79,19 @@ PGPASSWORD=secret pg-perf-bench benchmark \
   --ssh-known-hosts ~/.ssh/known_hosts \
   --remote-pg-host 127.0.0.1 \
   --remote-pg-port 5432 \
-  --pg-host 127.0.0.1 \
-  --pg-port 55432 \
-  --pg-user postgres \
-  --pg-database pg_perf_bench_test \
-  --pg-data-path /var/lib/postgresql/17/main \
-  --pg-bin-path /usr/lib/postgresql/17/bin \
+  --host 127.0.0.1 \
+  --port 55432 \
+  --user postgres \
+  --database pg_perf_bench_test \
+  --pg-data-path /var/lib/postgresql/18/main \
+  --pg-bin-path /usr/lib/postgresql/18/bin \
   --allow-database-reset \
   --benchmark-type default \
   --pgbench-clients 1,4,16 \
-  --pgbench-path /usr/bin/pgbench \
-  --psql-path /usr/bin/psql \
   --init-command 'ARG_PGBENCH_PATH -i -s 10 -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER ARG_PG_DATABASE' \
   --workload-command 'ARG_PGBENCH_PATH -T 60 -c ARG_PGBENCH_CLIENTS -j ARG_PGBENCH_CLIENTS -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER ARG_PG_DATABASE' \
   --command-timeout 120 \
-  --report-name ssh-pg17
+  --report-name ssh-pg18
 ```
 
 `--pg-custom-config` names a local source file. It is uploaded and atomically
@@ -102,13 +101,18 @@ renamed to the remote cluster's `postgresql.conf` before the reset sequence.
 sudo rule. Hardware collectors use `sudo -n` and fail fast when permission is
 not available.
 
+The load commands always execute locally through the tunnel. The newest local
+pgbench is selected automatically even when the remote server is PostgreSQL
+10–18. Concurrent CPU, RAM, disk, and network sampling executes on the remote
+database host through the already authenticated SSH session.
+
 ## Common failures
 
 - host-key error: update the selected known-hosts file after independently
   verifying the server key;
 - authentication failure: verify `--ssh-user`, private key permissions, and
   the installed public key;
-- local bind failure: choose an unused `--pg-port`;
+- local bind failure: choose an unused `--port`;
 - PostgreSQL connection failure with working SSH: verify the remote address,
   PostgreSQL authentication, and listen rules;
 - lifecycle failure: ensure `--ssh-user` owns or can control the cluster.

@@ -7,6 +7,7 @@ class JoinContext:
                 'join_tasks': args.join_tasks,
                 'reference_report': args.reference_report,
                 'input_dir': args.input_dir,
+                'report_paths': getattr(args, 'reports', None),
                 'report_name': args.report_name,
                 'logger': logger,
             }

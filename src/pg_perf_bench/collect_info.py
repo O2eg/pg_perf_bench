@@ -91,7 +91,13 @@ class InfoCollector:
             WorkMode.COLLECT_ALL_INFO,
         ]:
             if log_conf.get('collect_pg_logs') and db_conn:
-                await collect_db_logs(logger, client, db_conn, report)
+                await collect_db_logs(
+                    logger,
+                    client,
+                    db_conn,
+                    report,
+                    log_conf.get('db_logs_dir'),
+                )
 
     @staticmethod
     async def collect_info(
