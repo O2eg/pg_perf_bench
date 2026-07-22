@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pg-perf-bench"
 version = "0.2.0"
-description = "Reproducible PostgreSQL benchmark runner with environment evidence and portable reports"
+description = "Reproducible PostgreSQL TPS benchmarks with environment evidence and report comparison"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
