@@ -481,10 +481,12 @@ The legacy direct-Docker integration module is disabled unless
 
 ## Current scope
 
-The current report captures static environment facts and final PostgreSQL
-state. It does not yet provide continuous CPU, disk, network, wait-event, or
-`pg_stat_*` time-series sampling during the workload. Statistical repetitions,
-warm-up runs, and confidence intervals are outside the current execution model.
+The current report captures static environment facts, final PostgreSQL state,
+and continuous host CPU, RAM, disk, and network time series during every
+measured workload iteration. Continuous PostgreSQL wait-event and `pg_stat_*`
+time-series sampling is not yet part of the report. Statistical repetitions,
+warm-up runs, and confidence intervals remain outside the current execution
+model.
 
 ## License
 
