@@ -1,13 +1,16 @@
-# pg_perf_bench
+# pg-perf-bench
 
 ## Overview
 
 Based on [pg_perfbench](https://github.com/TantorLabs/pg_perfbench).
 
-`pg_perf_bench` runs controlled PostgreSQL benchmarks and stores the result
+`pg-perf-bench` runs controlled PostgreSQL benchmarks and stores the result
 together with the facts required to interpret it: the effective workload,
 PostgreSQL configuration, server version, host properties, execution timing,
 raw command output, and collection diagnostics.
+
+The distribution and installed command are `pg-perf-bench`; the import package
+and GitHub repository are named `pg_perf_bench`.
 
 Its benchmark question is maximum TPS for one workload profile and one complete
 environment, including OS and PostgreSQL settings. `pg_workload` schedules and
@@ -56,7 +59,7 @@ CLI and automation contract
 
 The transport controls PostgreSQL and executes host fact collectors on the
 selected target. The workload commands themselves run on the machine where
-`pg_perf_bench` is invoked:
+`pg-perf-bench` is invoked:
 
 | Transport | Host facts and PostgreSQL lifecycle | `pgbench` / `psql` |
 |---|---|---|
@@ -328,6 +331,35 @@ The workload reaches PostgreSQL through the port published on `--host` and
 --host 127.0.0.1 \
 --port 55432
 ```
+
+To use an identity already loaded into a local agent, replace `--ssh-key` with
+`--ssh-agent`:
+
+```bash
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519
+ssh-add -l
+
+pg-perf-bench collect-all-info \
+  --connection-type ssh \
+  --ssh-host db-host.example \
+  --ssh-user postgres \
+  --ssh-agent \
+  --ssh-known-hosts /secure/path/known_hosts \
+  --remote-pg-host 127.0.0.1 \
+  --remote-pg-port 5432 \
+  --host 127.0.0.1 \
+  --port 55432 \
+  --database appdb \
+  --pg-bin-path /usr/lib/postgresql/18/bin
+```
+
+`--ssh-key` and `--ssh-agent` are mutually exclusive. Agent mode uses the live
+socket inherited through `SSH_AUTH_SOCK`; the socket must remain available
+until collection or benchmarking finishes. The utility does not start an
+agent, run `ssh-add`, or forward the agent to the remote host. Both modes use
+explicit public-key authentication and the selected `known_hosts` policy
+without loading the user's OpenSSH configuration.
 
 For database modes, `--host` and `--port` are the local bind address and
 free port. `--remote-pg-host` and `--remote-pg-port` identify PostgreSQL from

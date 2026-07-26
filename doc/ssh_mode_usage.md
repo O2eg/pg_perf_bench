@@ -30,6 +30,20 @@ Install the public key for the account selected by `--ssh-user`. For benchmark
 mode that account must be able to run `pg_ctl` for the selected cluster; using
 the PostgreSQL service owner is the simplest model.
 
+The key may be referenced directly with `--ssh-key`, or loaded into an
+already-running local agent and selected with `--ssh-agent`:
+
+```bash
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/pg_perf_bench
+ssh-add -l
+```
+
+The two options are mutually exclusive. Agent mode requires a live Unix socket
+in the inherited `SSH_AUTH_SOCK` for the complete command. `pg-perf-bench`
+does not start the agent, load identities, or forward the agent to the target.
+Key mode explicitly disables agent fallback.
+
 Host-key verification is enabled by default. Use `--ssh-known-hosts` for a
 dedicated file. Reserve `--ssh-insecure-no-host-key-check` for isolated,
 disposable stands.
@@ -110,8 +124,10 @@ database host through the already authenticated SSH session.
 
 - host-key error: update the selected known-hosts file after independently
   verifying the server key;
-- authentication failure: verify `--ssh-user`, private key permissions, and
-  the installed public key;
+- authentication failure in key mode: verify `--ssh-user`, private key
+  permissions, and the installed public key;
+- authentication failure in agent mode: verify `SSH_AUTH_SOCK`, `ssh-add -l`,
+  the agent lifetime, and the installed public key;
 - local bind failure: choose an unused `--port`;
 - PostgreSQL connection failure with working SSH: verify the remote address,
   PostgreSQL authentication, and listen rules;

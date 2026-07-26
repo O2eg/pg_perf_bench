@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pg_perf_bench.config import resolve_ssh_agent_socket
 from pg_perf_bench.const import ConnectionType
 
 
@@ -43,17 +44,24 @@ class BaseContext:
 
     def _add_ssh_connection_config(self, args):
         """Add SSH connection configuration"""
+        use_agent = bool(getattr(args, 'ssh_agent', False))
         conn_params = {
             'host': args.ssh_host,
             'port': args.ssh_port,
             'username': getattr(args, 'ssh_user', None) or 'postgres',
-            'client_keys': args.ssh_key,
+            'client_keys': [] if use_agent else [args.ssh_key],
+            'agent_path': str(resolve_ssh_agent_socket()) if use_agent else None,
+            'agent_forwarding': False,
             'known_hosts': (
                 None
                 if getattr(args, 'ssh_insecure_no_host_key_check', False)
                 else getattr(args, 'ssh_known_hosts', None)
                 or str(Path('~/.ssh/known_hosts').expanduser())
             ),
+            'config': None,
+            'preferred_auth': ['publickey'],
+            'password_auth': False,
+            'kbdint_auth': False,
             'connect_timeout': float(getattr(args, 'connect_timeout', 5.0)),
         }
 

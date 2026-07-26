@@ -83,6 +83,14 @@ def test_render_html_is_monolithic_and_keeps_report_model() -> None:
     assert 'code.jquery.com' not in html_text
     assert '<script src=' not in html_text
     assert '<link rel="stylesheet" href=' not in html_text
+    assert 'https://github.com/O2eg/pg_perf_bench' in html_text
+    assert 'https://o2eg.com/' in html_text
+    assert 'https://t.me/O2egg' in html_text
+    assert (
+        html_text.index('https://github.com/O2eg/pg_perf_bench')
+        < html_text.index('https://o2eg.com/')
+        < html_text.index('https://t.me/O2egg')
+    )
 
 
 def test_render_html_escapes_script_breakout_sequences() -> None:

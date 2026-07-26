@@ -1,5 +1,6 @@
 import asyncio
 import json
+import socket
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -72,6 +73,78 @@ def test_collect_db_does_not_require_data_directory():
     config = build_runtime_config(args)
     assert config.host.pg_data_path is None
     assert config.database.database == 'postgres'
+
+
+def test_ssh_agent_builds_explicit_asyncssh_parameters(tmp_path, monkeypatch):
+    known_hosts = tmp_path / 'known_hosts'
+    known_hosts.write_text('db.example ssh-ed25519 placeholder\n', encoding='utf-8')
+    agent_path = tmp_path / 'agent.sock'
+
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as agent:
+        agent.bind(str(agent_path))
+        monkeypatch.setenv('SSH_AUTH_SOCK', str(agent_path))
+        args = build_parser().parse_args(
+            [
+                'collect-sys-info',
+                '--connection-type',
+                'ssh',
+                '--ssh-host',
+                'db.example',
+                '--ssh-user',
+                'postgres',
+                '--ssh-agent',
+                '--ssh-known-hosts',
+                str(known_hosts),
+            ]
+        )
+        config = build_runtime_config(args)
+        connection = config.host.connection_kwargs(None)['conn_params']
+
+    assert config.host.ssh_agent is True
+    assert config.host.ssh_key is None
+    assert connection['client_keys'] == []
+    assert connection['agent_path'] == str(agent_path)
+    assert connection['agent_forwarding'] is False
+    assert connection['config'] is None
+    assert connection['password_auth'] is False
+    assert connection['kbdint_auth'] is False
+
+
+def test_ssh_agent_requires_live_socket(tmp_path, monkeypatch):
+    known_hosts = tmp_path / 'known_hosts'
+    known_hosts.write_text('db.example ssh-ed25519 placeholder\n', encoding='utf-8')
+    monkeypatch.delenv('SSH_AUTH_SOCK', raising=False)
+    args = build_parser().parse_args(
+        [
+            'collect-sys-info',
+            '--connection-type',
+            'ssh',
+            '--ssh-host',
+            'db.example',
+            '--ssh-agent',
+            '--ssh-known-hosts',
+            str(known_hosts),
+        ]
+    )
+
+    with pytest.raises(ConfigurationError, match='SSH_AUTH_SOCK'):
+        build_runtime_config(args)
+
+
+def test_ssh_key_and_agent_are_mutually_exclusive():
+    with pytest.raises(ConfigurationError, match='not allowed with argument --ssh-key'):
+        build_parser().parse_args(
+            [
+                'collect-sys-info',
+                '--connection-type',
+                'ssh',
+                '--ssh-host',
+                'db.example',
+                '--ssh-key',
+                '/tmp/id_ed25519',
+                '--ssh-agent',
+            ]
+        )
 
 
 def test_database_and_output_options_follow_pg_diag_cli_naming(tmp_path):

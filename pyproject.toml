@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pg-perf-bench"
-version = "0.2.0"
+version = "0.2.1"
 description = "Reproducible PostgreSQL TPS benchmarks with environment evidence and report comparison"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,7 +25,7 @@ dependencies = [
   "asyncpg>=0.29,<1",
   "asyncssh>=2.21,<3",
   "docker>=7.1,<8",
-  "pg-diag>=0.10.3,<1",
+  "pg-diag>=0.10.5,<1",
   "aenum>=3.1,<4; python_version < '3.11'",
 ]
 
@@ -47,7 +47,7 @@ dev = [
 pg-perf-bench = "pg_perf_bench.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/O2eg/pg_perf_bench"
+Homepage = "https://o2eg.com/"
 Repository = "https://github.com/O2eg/pg_perf_bench"
 Issues = "https://github.com/O2eg/pg_perf_bench/issues"
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import os
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,20 @@ from pg_perf_bench.workloads import load_workload_profile
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 5.0
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 300.0
 PROTECTED_DATABASES = frozenset({'postgres', 'template0', 'template1'})
+
+
+def resolve_ssh_agent_socket() -> Path:
+    raw_path = os.environ.get('SSH_AUTH_SOCK')
+    if not raw_path:
+        raise ConfigurationError('--ssh-agent requires SSH_AUTH_SOCK to reference a running agent')
+    path = Path(raw_path).expanduser()
+    try:
+        mode = path.stat().st_mode
+    except OSError as exc:
+        raise ConfigurationError(f'SSH agent socket is not available: {path}') from exc
+    if not stat.S_ISSOCK(mode):
+        raise ConfigurationError(f'SSH_AUTH_SOCK is not a socket: {path}')
+    return path
 
 
 def _positive_int(value: Any, option: str) -> int:
@@ -100,6 +116,7 @@ class HostConfig:
     ssh_port: int = 22
     ssh_user: str = 'postgres'
     ssh_key: Path | None = None
+    ssh_agent: bool = False
     ssh_known_hosts: Path | None = None
     ssh_insecure_no_host_key_check: bool = False
     remote_pg_host: str | None = None
@@ -131,8 +148,14 @@ class HostConfig:
                 'host': self.ssh_host,
                 'port': self.ssh_port,
                 'username': self.ssh_user,
-                'client_keys': str(self.ssh_key) if self.ssh_key else None,
+                'client_keys': [str(self.ssh_key)] if self.ssh_key else [],
+                'agent_path': str(resolve_ssh_agent_socket()) if self.ssh_agent else None,
+                'agent_forwarding': False,
                 'known_hosts': known_hosts,
+                'config': None,
+                'preferred_auth': ['publickey'],
+                'password_auth': False,
+                'kbdint_auth': False,
                 'connect_timeout': min(self.command_timeout, 30.0),
             },
             'env': env,
@@ -267,6 +290,7 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
         ssh_port=_positive_int(values.get('ssh_port') or 22, '--ssh-port'),
         ssh_user=values.get('ssh_user') or 'postgres',
         ssh_key=Path(ssh_key_value).expanduser() if ssh_key_value else None,
+        ssh_agent=bool(values.get('ssh_agent')),
         ssh_known_hosts=(
             Path(values['ssh_known_hosts']).expanduser() if values.get('ssh_known_hosts') else None
         ),
@@ -401,10 +425,12 @@ def _validate_host(host: HostConfig, *, needs_database: bool) -> None:
         return
     _required(host.ssh_host, '--ssh-host')
     _required(host.ssh_user, '--ssh-user')
-    _required(host.ssh_key, '--ssh-key')
-    assert host.ssh_key is not None
-    if not host.ssh_key.is_file():
+    if (host.ssh_key is None) == (not host.ssh_agent):
+        raise ConfigurationError('SSH requires exactly one of --ssh-key or --ssh-agent')
+    if host.ssh_key is not None and not host.ssh_key.is_file():
         raise ConfigurationError(f'SSH private key does not exist: {host.ssh_key}')
+    if host.ssh_agent:
+        resolve_ssh_agent_socket()
     if not host.ssh_insecure_no_host_key_check:
         known_hosts = host.ssh_known_hosts or Path('~/.ssh/known_hosts').expanduser()
         if not known_hosts.is_file():

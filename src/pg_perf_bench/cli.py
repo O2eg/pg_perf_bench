@@ -113,7 +113,13 @@ def _add_host_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--ssh-host')
     parser.add_argument('--ssh-port', type=positive_int, default=22)
     parser.add_argument('--ssh-user', default='postgres')
-    parser.add_argument('--ssh-key')
+    ssh_auth = parser.add_mutually_exclusive_group()
+    ssh_auth.add_argument('--ssh-key')
+    ssh_auth.add_argument(
+        '--ssh-agent',
+        action='store_true',
+        help='authenticate through the existing SSH_AUTH_SOCK agent',
+    )
     parser.add_argument('--ssh-known-hosts')
     parser.add_argument('--ssh-insecure-no-host-key-check', action='store_true')
     parser.add_argument('--remote-pg-host')

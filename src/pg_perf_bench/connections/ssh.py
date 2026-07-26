@@ -42,7 +42,7 @@ class SSHConnection:
         except asyncssh.PermissionDenied as exc:
             await self.aclose()
             raise PermissionError(
-                'Verify the SSH user and private key for remote server access.'
+                'Verify the SSH user and selected key or agent identity for remote server access.'
             ) from exc
         except (asyncssh.ConnectionLost, OSError, asyncio.TimeoutError) as exc:
             await self.aclose()

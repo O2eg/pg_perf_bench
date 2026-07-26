@@ -96,7 +96,7 @@ class TestSSHConnectionFunctions(unittest.IsolatedAsyncioTestCase):
             'pg_perf_bench.connections.ssh.asyncssh.connect',
             side_effect=asyncssh.PermissionDenied('denied'),
         ):
-            with self.assertRaisesRegex(PermissionError, 'private key'):
+            with self.assertRaisesRegex(PermissionError, 'selected key or agent identity'):
                 await self.connection.start()
 
 

@@ -77,7 +77,7 @@ class CollectInfoContext(BaseContext):
         }
 
     def filter_none(self, d: dict) -> dict:
-        SSHConnectionArgs = ['ssh_host', 'ssh_port', 'ssh_key']
+        SSHConnectionArgs = ['ssh_host', 'ssh_port']
         DockerConnectionArgs = [
             'container_name',
         ]
@@ -101,6 +101,11 @@ class CollectInfoContext(BaseContext):
 
         ctype = d.get('connection_type')
         if ctype == ConnectionType.SSH:
+            if bool(d.get('ssh_key')) == bool(d.get('ssh_agent')):
+                raise ValueError(
+                    'Exactly one of "--ssh-key" or "--ssh-agent" must be specified '
+                    f'for connection type "{ConnectionType.SSH}"'
+                )
             for key in SSHConnectionArgs:
                 if d.get(key) is None:
                     raise ValueError(
