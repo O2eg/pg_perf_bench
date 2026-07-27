@@ -44,3 +44,39 @@ class TestBenchmarkFunctions(unittest.TestCase):
         self.assertEqual(result['tps'], 42.0)
         self.assertEqual(result['iteration']['value'], 8)
         self.assertEqual(result['metrics']['latency'], 4.0)
+
+    def test_invocation_summary_contains_safe_report_parameters(self):
+        summary = BenchmarkRunner.build_invocation_summary(
+            'local_docker',
+            {
+                'host': '127.0.0.1',
+                'port': 55432,
+                'user': 'postgres',
+                'password': 'must-not-leak',
+                'database': 'workload_demo',
+            },
+            {
+                'workload_profile': 'pagila',
+                'workload_scale': 0.05,
+                'workload_duration_seconds': 30,
+                'pgbench_iter_name': 'pgbench_clients',
+                'pgbench_iter_list': [1, 2, 4],
+                'system_metrics_interval': 1.0,
+                'system_metrics_duration': None,
+                'allow_database_reset': True,
+                'drop_os_caches': False,
+            },
+        )
+
+        self.assertEqual(
+            summary['database'],
+            {
+                'host': '127.0.0.1',
+                'port': 55432,
+                'name': 'workload_demo',
+                'user': 'postgres',
+            },
+        )
+        self.assertEqual(summary['workload']['iteration_values'], [1, 2, 4])
+        self.assertEqual(summary['metrics']['engine'], 'pg_diag')
+        self.assertNotIn('password', str(summary).lower())

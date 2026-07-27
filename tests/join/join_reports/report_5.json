@@ -4,7 +4,7 @@
     "description": "2025-03-11_00-00-00",
     "sections": {
         "system": {
-            "header": "System properties <hn>",
+            "header": "System properties",
             "description": "Common info about current host",
             "state": "expanded",
             "reports": {

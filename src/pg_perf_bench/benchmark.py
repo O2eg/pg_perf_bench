@@ -447,6 +447,44 @@ class BenchmarkRunner:
         return report
 
     @staticmethod
+    def build_invocation_summary(
+        conn_type: str,
+        db_conf: dict[str, Any],
+        workload_conf: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return the safe, user-facing parameters that define a benchmark run."""
+        return {
+            'schema_version': 'pg_perf_bench/invocation-v1',
+            'mode': 'benchmark',
+            'connection_type': str(conn_type),
+            'database': {
+                'host': db_conf.get('host'),
+                'port': db_conf.get('port'),
+                'name': db_conf.get('database'),
+                'user': db_conf.get('user'),
+            },
+            'workload': {
+                'profile': workload_conf.get('workload_profile'),
+                'scale': workload_conf.get('workload_scale'),
+                'duration_seconds': workload_conf.get('workload_duration_seconds'),
+                'iteration_parameter': workload_conf.get('pgbench_iter_name'),
+                'iteration_values': list(workload_conf.get('pgbench_iter_list') or []),
+            },
+            'metrics': {
+                'engine': 'pg_diag',
+                'interval_seconds': workload_conf.get('system_metrics_interval'),
+                'duration_override_seconds': workload_conf.get('system_metrics_duration'),
+            },
+            'safety': {
+                'database_recreated_before_each_iteration': True,
+                'database_reset_authorized': bool(workload_conf.get('allow_database_reset')),
+                'os_caches_dropped_before_each_iteration': bool(
+                    workload_conf.get('drop_os_caches')
+                ),
+            },
+        }
+
+    @staticmethod
     def setup_connection(conn_type: str, conn_conf: dict, logger):
         """
         Initializes a database connection object based on the selected type.
@@ -559,6 +597,11 @@ class BenchmarkRunner:
 
         try:
             report = BenchmarkRunner.setup_report_structure(report_conf, logger)
+            report['invocation'] = BenchmarkRunner.build_invocation_summary(
+                conn_type,
+                db_conf,
+                workload_conf,
+            )
             load_iterations = BenchmarkRunner.load_iterations_config(db_conf, workload_conf)
             if not load_iterations:
                 logger.error('No valid load iterations configured.')

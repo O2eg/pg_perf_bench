@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pg-perf-bench"
-version = "0.2.1"
+version = "0.2.2"
 description = "Reproducible PostgreSQL TPS benchmarks with environment evidence and report comparison"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,7 +17,7 @@ license-files = [
   "src/pg_perf_bench/templates/vendor/THIRD_PARTY_LICENSES.txt",
 ]
 authors = [
-  { name = "O2eg", email = "oleg.ispu@yandex.ru" },
+  { name = "O2eg", email = "oleg.ispu@gmail.com" },
 ]
 keywords = ["postgresql", "benchmark", "pgbench", "performance", "diagnostics"]
 dependencies = [

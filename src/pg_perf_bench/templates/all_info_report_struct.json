@@ -4,7 +4,7 @@
     "description": "",
     "sections": {
         "system": {
-            "header": "System properties <hn>",
+            "header": "System properties",
             "description": "Common info about current host",
             "state": "expanded",
             "reports": {

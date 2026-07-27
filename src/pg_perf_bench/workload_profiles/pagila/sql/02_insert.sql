@@ -260,14 +260,21 @@ COMMIT;
 -- -- Transaction 6: New store creation
 BEGIN;
 WITH new_staff AS (
-    SELECT staff_id FROM staff
-    WHERE staff_id NOT IN (SELECT manager_staff_id FROM store)
+    SELECT staff_id
+    FROM staff
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM store
+        WHERE store.manager_staff_id = staff.staff_id
+    )
     ORDER BY random()
     LIMIT 1
+    FOR UPDATE SKIP LOCKED
 )
 INSERT INTO store (manager_staff_id, address_id)
 SELECT
     staff_id,
     :v_rnd_address_id
-FROM new_staff;
+FROM new_staff
+ON CONFLICT (manager_staff_id) DO NOTHING;
 COMMIT;

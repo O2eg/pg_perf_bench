@@ -59,6 +59,15 @@ def test_bundled_profiles_are_complete_and_do_not_copy_pg_workload_manifest():
         assert list((root / 'sql').glob('*.sql'))
 
 
+def test_pagila_store_creation_is_concurrency_safe():
+    insert_sql = (
+        Path(__file__).parents[1] / 'src/pg_perf_bench/workload_profiles/pagila/sql/02_insert.sql'
+    ).read_text(encoding='utf-8')
+
+    assert 'FOR UPDATE SKIP LOCKED' in insert_sql
+    assert 'ON CONFLICT (manager_staff_id) DO NOTHING' in insert_sql
+
+
 def test_profile_supplies_commands_and_report_evidence_embeds_all_sources():
     config = _profile_runtime()
     assert config.workload is not None and config.database is not None and config.host is not None

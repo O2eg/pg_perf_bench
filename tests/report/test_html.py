@@ -12,6 +12,29 @@ def sample_report() -> dict:
         'header': 'PostgreSQL benchmark report',
         'report_name': 'smoke_report',
         'description': 'Current report content',
+        'generator': {'name': 'pg_perf_bench', 'version': '0.2.1'},
+        'invocation': {
+            'mode': 'benchmark',
+            'connection_type': 'local_docker',
+            'database': {
+                'host': '127.0.0.1',
+                'port': 5432,
+                'name': 'postgres',
+                'user': 'postgres',
+            },
+            'workload': {
+                'profile': 'pagila',
+                'scale': 0.1,
+                'duration_seconds': 30,
+                'iteration_parameter': 'pgbench_clients',
+                'iteration_values': [1, 2],
+            },
+            'metrics': {'engine': 'pg_diag', 'interval_seconds': 1.0},
+            'safety': {
+                'database_recreated_before_each_iteration': True,
+                'os_caches_dropped_before_each_iteration': False,
+            },
+        },
         'sections': {
             'result': {
                 'header': 'Test results',
@@ -91,6 +114,38 @@ def test_render_html_is_monolithic_and_keeps_report_model() -> None:
         < html_text.index('https://o2eg.com/')
         < html_text.index('https://t.me/O2egg')
     )
+    assert '<body class="nav-collapsed">' in html_text
+    assert 'class="nav-toggle"' in html_text
+    assert 'class="button nav-toggle"' not in html_text
+    assert 'text-overflow: ellipsis;' in html_text
+    assert 'white-space: nowrap;' in html_text
+    assert 'class="report-toolbar"' in html_text
+    assert 'class="filter-summary-panel"' in html_text
+    assert 'class="page-scroll-controls"' in html_text
+    assert 'id="scrollToTop"' in html_text
+    assert 'id="scrollToBottom"' in html_text
+    assert 'Showing ${visible} from ${renderedItems}' in html_text
+    assert 'closeChartExportMenus' in html_text
+    assert "event.target.closest('.chart-export-menu')" in html_text
+    assert 'const DETAILS_ANIMATION_MS = 300;' in html_text
+    assert 'const wrapDetailsContent' in html_text
+    assert 'const bindAnimatedDetails' in html_text
+    assert 'setDetailsOpen(item, true, true);' in html_text
+    assert 'setDetailsOpen(item, false, true);' in html_text
+    assert 'width: max-content;' in html_text
+    assert 'max-height: 72vh;' in html_text
+    assert 'const renderTableCell' in html_text
+    assert "'Show more'" in html_text
+    assert "'Show less'" in html_text
+    assert 'class="theme-toggle header-theme-toggle"' in html_text
+    assert html_text.index('header-theme-toggle') < html_text.index('<main class="shell">')
+    assert "'chart-legend-panel'" in html_text
+    assert "title: 'Zoom in'" in html_text
+    assert "title: 'Zoom out'" in html_text
+    assert "title: 'Export'" in html_text
+    assert "['svg', 'png', 'csv']" in html_text
+    assert "type: 'slider'" not in html_text
+    assert 'parameters:' in html_text
 
 
 def test_render_html_escapes_script_breakout_sequences() -> None:

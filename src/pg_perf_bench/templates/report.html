@@ -21,6 +21,7 @@
       --input-bg: #1d1526;
       --button-bg: #2b2035;
       --button-hover-bg: #392847;
+      --button-hover-border: #d6b35f;
       --summary-bg: #2a1f34;
       --section-summary-bg: #3a2748;
       --section-summary-fg: #fff7d6;
@@ -53,6 +54,7 @@
       --input-bg: #fffdf7;
       --button-bg: #fffaf0;
       --button-hover-bg: #f6ecff;
+      --button-hover-border: #b98bd6;
       --summary-bg: #f6effc;
       --section-summary-bg: #eadbf6;
       --section-summary-fg: #2a1738;
@@ -84,97 +86,307 @@
       width: min(100%, 1480px);
       margin: 0 auto;
       padding: 0 28px;
-      transition: padding-left 220ms ease;
+      transition: padding-left 300ms ease;
     }
     @media (min-width: 1180px) {
       .shell { padding-left: 278px; }
-      body.nav-collapsed .shell { padding-left: 86px; }
+      body.nav-collapsed .shell { padding-left: 80px; }
     }
 
     .app-header {
+      position: relative;
       background: var(--header);
       border-bottom: 1px solid var(--line);
       color: var(--header-fg);
     }
-    .app-header .shell { padding-top: 22px; padding-bottom: 20px; }
-    h1 { margin: 0 0 6px; font-size: clamp(22px, 3vw, 30px); line-height: 1.2; }
-    .report-name { color: var(--header-muted); font-size: 17px; font-weight: 650; }
-    .description { max-width: 940px; margin-top: 8px; color: var(--header-muted); white-space: pre-wrap; }
-    .project-links { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; }
-    .project-link { display: inline-flex; align-items: center; gap: 7px; text-decoration: none; }
-    .project-link:hover { text-decoration: underline; }
-    .project-link svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; }
+    .app-header .shell { padding-top: 20px; padding-bottom: 18px; }
+    h1 { margin: 0 0 2px; font-size: 25px; line-height: 1.2; }
+    .report-name {
+      margin: 0 0 6px;
+      color: var(--header-muted);
+      font-size: 18px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+    .runtime {
+      color: var(--header-muted);
+      font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+    .runtime + .runtime { margin-top: 4px; }
+    .project-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      font-family: inherit;
+    }
+    .project-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--header-muted);
+      text-decoration: none;
+    }
+    .project-link:hover,
+    .project-link:focus-visible {
+      color: var(--header-fg);
+      text-decoration: underline;
+      outline: none;
+    }
+    .project-link svg {
+      width: 14px;
+      height: 14px;
+      flex: 0 0 auto;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
 
     .report-nav {
       position: fixed;
       z-index: 20;
       inset: 0 auto 0 0;
-      width: 250px;
+      width: 244px;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
       background: var(--panel);
       border-right: 1px solid var(--line);
-      overflow: auto;
-      transition: width 220ms ease;
+      border-top: 1px solid var(--line);
+      border-radius: 0 8px 0 0;
+      box-shadow: 0 14px 38px rgb(0 0 0 / 24%);
+      overflow: hidden;
+      transition: width 300ms ease, box-shadow 300ms ease;
     }
     .nav-title {
-      position: sticky;
-      top: 0;
-      z-index: 1;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      min-height: 54px;
-      padding: 12px 13px 12px 18px;
-      background: var(--panel);
+      gap: 8px;
+      padding: 9px 11px;
+      background: var(--section-summary-bg);
       border-bottom: 1px solid var(--line);
-      font-weight: 750;
+      color: var(--section-summary-fg);
+      font-size: 13px;
+      font-weight: 700;
+      transition: padding 300ms ease, gap 300ms ease;
     }
-    .nav-toggle { width: 34px; height: 34px; padding: 0; }
-    .nav-toggle::before { content: "‹"; font-size: 24px; }
-    .nav-tree { padding: 12px; }
-    .nav-section { margin-bottom: 14px; }
-    .nav-section > a { color: var(--text); font-weight: 700; }
-    .nav-tree a { display: block; padding: 5px 7px; border-radius: 6px; text-decoration: none; overflow-wrap: anywhere; }
-    .nav-tree a:hover { background: var(--panel-soft); }
-    .nav-items { margin-top: 3px; padding-left: 11px; border-left: 2px solid var(--line); }
-    .nav-items a { color: var(--muted); font-size: 12px; }
-    body.nav-collapsed .report-nav { width: 58px; overflow: hidden; }
-    body.nav-collapsed .nav-title { padding: 10px 12px; }
-    body.nav-collapsed .nav-title-text,
-    body.nav-collapsed .nav-tree { display: none; }
-    body.nav-collapsed .nav-toggle::before { content: "›"; }
+    .nav-title-text {
+      min-width: 0;
+      max-width: 160px;
+      overflow: hidden;
+      white-space: nowrap;
+      opacity: 1;
+      transition: max-width 300ms ease, opacity 180ms ease, transform 300ms ease;
+    }
+    .nav-toggle {
+      flex: 0 0 auto;
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      padding: 0;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: rgb(255 255 255 / 4%);
+      color: var(--section-summary-fg);
+      cursor: pointer;
+      transition: background 180ms ease, border-color 180ms ease, color 180ms ease;
+    }
+    .nav-toggle:hover,
+    .nav-toggle:focus-visible {
+      border-color: var(--accent);
+      background: var(--button-hover-bg);
+      outline: none;
+    }
+    .nav-toggle::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border: solid currentColor;
+      border-width: 0 2px 2px 0;
+      transform: rotate(135deg);
+      transition: transform 300ms ease;
+    }
+    .nav-tree {
+      min-width: 0;
+      overflow: auto;
+      padding: 7px;
+      opacity: 1;
+      transition: opacity 180ms ease;
+    }
+    .nav-section {
+      display: grid;
+      gap: 3px;
+      margin-bottom: 6px;
+    }
+    .nav-tree a {
+      display: block;
+      width: 100%;
+      min-width: 0;
+      min-height: 30px;
+      padding: 5px 7px;
+      overflow: hidden;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      color: var(--text);
+      text-decoration: none;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .nav-tree a:hover,
+    .nav-tree a:focus-visible {
+      border-color: var(--line-strong);
+      background: var(--button-hover-bg);
+      outline: none;
+    }
+    .nav-section > a {
+      color: var(--section-summary-fg);
+      font-weight: 700;
+    }
+    .nav-items {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+    .nav-items a {
+      padding-left: 20px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    body.nav-collapsed .report-nav {
+      width: 46px;
+      box-shadow: 0 10px 28px rgb(0 0 0 / 18%);
+    }
+    body.nav-collapsed .nav-title {
+      justify-content: center;
+      gap: 0;
+      padding: 7px;
+    }
+    body.nav-collapsed .nav-title-text {
+      max-width: 0;
+      opacity: 0;
+      transform: translateX(-6px);
+    }
+    body.nav-collapsed .nav-tree {
+      opacity: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+    body.nav-collapsed .nav-toggle::before { transform: rotate(-45deg); }
 
-    main.shell { padding-top: 18px; padding-bottom: 56px; }
-    .toolbar {
-      position: sticky;
-      top: 0;
-      z-index: 10;
-      display: flex;
-      flex-wrap: wrap;
+    main.shell { padding-top: 22px; padding-bottom: 42px; }
+    .report-toolbar {
+      display: grid;
+      grid-template-columns: minmax(220px, 1.2fr) minmax(120px, 180px);
       gap: 10px;
       align-items: end;
-      margin-bottom: 16px;
-      padding: 12px;
-      background: color-mix(in srgb, var(--bg) 88%, transparent);
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      backdrop-filter: blur(10px);
-      box-shadow: var(--shadow);
+      margin-bottom: 10px;
     }
-    .field { display: grid; gap: 4px; min-width: 170px; color: var(--muted); font-size: 12px; }
-    .field-grow { flex: 1 1 300px; }
+    .filter-summary-panel {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+      min-height: 34px;
+      margin-bottom: 16px;
+      padding: 6px 9px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .filter-summary-actions {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-self: start;
+      min-width: 0;
+    }
+    .filter-summary-spacer { justify-self: end; }
+    #filterSummary {
+      justify-self: center;
+      text-align: center;
+    }
+    .field { display: grid; gap: 4px; min-width: 0; }
+    .field span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
     .input, .select, .button {
-      min-height: 36px;
+      min-height: 34px;
       color: var(--text);
       background: var(--input-bg);
       border: 1px solid var(--line-strong);
-      border-radius: 7px;
+      border-radius: 6px;
     }
-    .input, .select { width: 100%; padding: 7px 9px; }
-    .button { padding: 7px 12px; cursor: pointer; background: var(--button-bg); }
-    .button:hover { background: var(--button-hover-bg); border-color: var(--accent); }
-    .theme-control { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; color: var(--muted); }
-    .filter-summary { margin: -5px 2px 15px; color: var(--muted); font-size: 12px; }
-
+    .input, .select { width: 100%; padding: 6px 9px; }
+    .button {
+      padding: 6px 11px;
+      cursor: pointer;
+      background: var(--button-bg);
+      white-space: nowrap;
+    }
+    .button:hover {
+      background: var(--button-hover-bg);
+      border-color: var(--button-hover-border);
+    }
+    .theme-toggle {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 34px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .header-theme-toggle {
+      position: absolute;
+      top: 18px;
+      right: max(18px, env(safe-area-inset-right));
+      z-index: 2;
+      padding: 5px 9px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgb(255 255 255 / 4%);
+    }
+    .theme-toggle input {
+      appearance: none;
+      position: relative;
+      width: 42px;
+      height: 22px;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      background: var(--button-bg);
+      cursor: pointer;
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+    .theme-toggle input::before {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: transform 120ms ease, background 120ms ease;
+    }
+    .theme-toggle input:checked {
+      border-color: var(--accent);
+      background: var(--accent);
+    }
+    .theme-toggle input:checked::before {
+      transform: translateX(20px);
+      background: var(--header-fg);
+    }
     details.section, details.report-item {
       overflow: clip;
       border: 1px solid var(--line);
@@ -186,8 +398,39 @@
     details.report-item { margin: 10px 0; box-shadow: none; }
     summary { list-style: none; cursor: pointer; }
     summary::-webkit-details-marker { display: none; }
-    summary::before { content: "›"; display: inline-block; margin-right: 9px; transition: transform 120ms ease; }
+    summary::before { content: "›"; display: inline-block; margin-right: 9px; transition: transform 300ms ease; }
     details[open] > summary::before { transform: rotate(90deg); }
+    details.is-closing > summary::before { transform: rotate(0deg); }
+    .details-content {
+      display: grid;
+      grid-template-rows: 1fr;
+      min-width: 0;
+      overflow: clip;
+      opacity: 1;
+      transition: grid-template-rows 300ms ease, opacity 220ms ease;
+    }
+    .details-content-inner {
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+    }
+    details.is-opening > .details-content,
+    details.is-closing > .details-content {
+      grid-template-rows: 0fr;
+      opacity: 0;
+    }
+    details[open]:not(.is-opening):not(.is-closing) > .details-content {
+      grid-template-rows: 1fr;
+      overflow: visible;
+      opacity: 1;
+    }
+    details[open]:not(.is-opening):not(.is-closing) > .details-content > .details-content-inner {
+      overflow: visible;
+    }
+    details.section[open]:not(.is-opening):not(.is-closing),
+    details.report-item[open]:not(.is-opening):not(.is-closing) {
+      overflow: visible;
+    }
     .section-summary {
       padding: 14px 16px;
       color: var(--section-summary-fg);
@@ -206,6 +449,10 @@
       font-weight: 680;
     }
     details.report-item[open] > .item-summary { color: var(--item-summary-open-fg); background: var(--item-summary-open-bg); }
+    details.report-item.is-closing > .item-summary {
+      color: var(--text);
+      background: var(--item-summary-bg);
+    }
     .item-summary::before { flex: 0 0 auto; }
     .item-title { flex: 1; }
     .badge {
@@ -240,10 +487,24 @@
     .table-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin: 0 0 9px; }
     .table-tools .field { min-width: 120px; }
     .table-tools .table-search { flex: 1 1 230px; }
-    .table-meta { margin-left: auto; padding-bottom: 8px; color: var(--muted); font-size: 12px; }
-    .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    th, td { padding: 8px 10px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    .table-meta { margin-left: auto; padding-bottom: 8px; color: var(--muted); font-size: 13px; }
+    .table-wrap {
+      width: 100%;
+      max-width: 100%;
+      max-height: 72vh;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      table-layout: auto;
+      font-size: inherit;
+    }
+    th, td { padding: 7px 8px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
     th:last-child, td:last-child { border-right: 0; }
     tbody tr:last-child td { border-bottom: 0; }
     tbody tr:nth-child(even) { background: var(--row-alt-bg); }
@@ -252,54 +513,352 @@
       position: sticky;
       top: 0;
       z-index: 1;
-      min-width: 100px;
       color: var(--text);
       background: var(--table-head-bg);
       white-space: nowrap;
     }
-    .sort-button { all: unset; display: flex; gap: 7px; align-items: center; width: 100%; cursor: pointer; }
+    .sort-button {
+      all: unset;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      width: 100%;
+      min-height: 34px;
+      cursor: pointer;
+      font-weight: 700;
+    }
     .sort-mark { color: var(--accent-fg); }
-    .cell-value { max-width: 560px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    td { max-width: 520px; overflow-wrap: normal; }
+    .cell-content {
+      --cell-line-height: 1.35;
+      --cell-collapsed-lines: 6;
+      max-height: calc(var(--cell-collapsed-lines) * var(--cell-line-height) * 1em);
+      overflow: hidden;
+      line-height: var(--cell-line-height);
+      white-space: pre-wrap;
+      overflow-wrap: break-word;
+      word-break: normal;
+    }
+    .cell-content.expanded { max-height: none; }
+    .json-cell {
+      margin: 0;
+      font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+    }
+    .button.ghost { background: transparent; }
+    .cell-toggle {
+      min-height: 26px;
+      margin-top: 5px;
+      padding: 3px 7px;
+      font-size: 12px;
+    }
     .pagination { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 9px; }
-    .page-label { color: var(--muted); font-size: 12px; }
+    .page-label { color: var(--muted); font-size: 13px; }
 
-    .chart { width: 100%; height: 390px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
     .chart-stack { display: grid; gap: 18px; }
     .chart-block { display: grid; gap: 8px; }
     .chart-meta { color: var(--muted); font-size: 12px; }
     .chart-fallback { margin-top: 10px; }
+    .chart-shell {
+      position: relative;
+      min-width: 0;
+      padding: 12px;
+      overflow: visible;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+    }
+    .echarts-chart {
+      box-sizing: border-box;
+      width: 100%;
+      height: 470px;
+      min-height: 470px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--input-bg);
+    }
+    .chart-legend-panel {
+      box-sizing: border-box;
+      display: flex;
+      flex-wrap: wrap;
+      align-content: flex-start;
+      gap: 5px 14px;
+      width: 100%;
+      max-height: 160px;
+      margin-top: 8px;
+      padding: 8px 10px;
+      overflow-x: hidden;
+      overflow-y: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--input-bg);
+      scrollbar-gutter: stable;
+      scrollbar-width: thin;
+      scrollbar-color: var(--line-strong) var(--panel-soft);
+      overscroll-behavior: contain;
+    }
+    .chart-legend-item {
+      box-sizing: border-box;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      max-width: 100%;
+      min-height: 19px;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      border: 0;
+      background: transparent;
+      color: var(--text);
+      font: 12px/19px ui-sans-serif, system-ui, sans-serif;
+      text-align: left;
+      cursor: pointer;
+    }
+    .chart-legend-item[aria-pressed="false"] { opacity: 0.42; }
+    .chart-legend-item:focus-visible {
+      outline: 1px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .chart-legend-marker {
+      flex: 0 0 auto;
+      width: 20px;
+      height: 10px;
+      border-radius: 2px;
+    }
+    .chart-legend-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .chart-export-menu[hidden] { display: none; }
+    .chart-export-menu {
+      position: absolute;
+      z-index: 20;
+      top: 50px;
+      right: 24px;
+      display: grid;
+      min-width: 138px;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: var(--panel);
+      box-shadow: 0 12px 30px rgb(0 0 0 / 34%);
+    }
+    .chart-export-menu button {
+      appearance: none;
+      padding: 9px 12px;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: transparent;
+      color: var(--text);
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .chart-export-menu button:last-child { border-bottom: 0; }
+    .chart-export-menu button:hover,
+    .chart-export-menu button:focus-visible {
+      background: var(--button-hover-bg);
+      outline: none;
+    }
+    .pg-diag-echarts-tooltip {
+      z-index: 60 !important;
+      overflow: hidden !important;
+      border: 1px solid var(--line) !important;
+      border-radius: 6px !important;
+      background: var(--panel) !important;
+      color: var(--text) !important;
+      box-shadow: 0 12px 30px rgb(0 0 0 / 32%) !important;
+      pointer-events: auto !important;
+    }
+    .pg-diag-chart-tooltip {
+      box-sizing: border-box;
+      min-width: 260px;
+      max-width: min(520px, 70vw);
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .pg-diag-chart-tooltip-title {
+      padding: 9px 11px;
+      border-bottom: 1px solid var(--line);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .pg-diag-chart-tooltip-rows {
+      max-height: 360px;
+      padding: 5px 0;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+    .pg-diag-chart-tooltip-row {
+      display: grid;
+      grid-template-columns: 9px minmax(0, 1fr) max-content;
+      gap: 7px;
+      align-items: center;
+      padding: 4px 10px;
+    }
+    .pg-diag-chart-tooltip-marker {
+      width: 9px;
+      height: 9px;
+      border-radius: 2px;
+    }
+    .pg-diag-chart-tooltip-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .pg-diag-chart-tooltip-value {
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+    }
     .link-list { display: grid; gap: 8px; }
     .link-card { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-soft); }
     .link-label { color: var(--muted); font-size: 12px; }
+    .page-scroll-controls {
+      position: fixed;
+      right: max(18px, env(safe-area-inset-right));
+      bottom: max(18px, env(safe-area-inset-bottom));
+      z-index: 35;
+      display: grid;
+      gap: 10px;
+      pointer-events: none;
+    }
+    .scroll-jump {
+      position: relative;
+      width: 46px;
+      height: 46px;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      background: var(--accent);
+      color: var(--accent-contrast);
+      box-shadow: 0 10px 28px rgb(0 0 0 / 28%);
+      cursor: pointer;
+      opacity: 0;
+      transform: translateY(12px) scale(0.92);
+      transition:
+        opacity 220ms ease,
+        transform 220ms ease,
+        background-color 160ms ease,
+        border-color 160ms ease;
+      pointer-events: none;
+    }
+    .scroll-jump.visible {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+    .scroll-jump:hover {
+      border-color: var(--accent);
+      background: var(--header-fg);
+    }
+    .scroll-jump:focus-visible {
+      outline: 2px solid var(--header-fg);
+      outline-offset: 3px;
+    }
+    .scroll-jump::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 12px;
+      height: 12px;
+      border-left: 3px solid currentColor;
+      border-top: 3px solid currentColor;
+    }
+    .scroll-jump.scroll-up::before {
+      transform: translate(-50%, -35%) rotate(45deg);
+    }
+    .scroll-jump.scroll-down::before {
+      transform: translate(-50%, -65%) rotate(225deg);
+    }
+    html[data-theme="light"] .scroll-jump {
+      border-color: #bba3d0;
+      background: #ffffff;
+      color: #5d3978;
+      box-shadow: 0 6px 18px rgb(63 38 82 / 18%);
+    }
+    html[data-theme="light"] .scroll-jump:hover {
+      border-color: #7a4da0;
+      background: #eadbf6;
+      color: #2a1738;
+    }
+    html[data-theme="light"] .scroll-jump:focus-visible {
+      outline-color: #7a4da0;
+    }
     .hidden { display: none !important; }
 
     @media (max-width: 1179px) {
       .report-nav { display: none; }
       .shell { padding-left: 18px; padding-right: 18px; }
     }
+    @media (max-width: 840px) {
+      .report-toolbar {
+        grid-template-columns: 1fr;
+      }
+      .filter-summary-panel {
+        grid-template-columns: 1fr;
+      }
+      .filter-summary-actions,
+      .filter-summary-spacer,
+      #filterSummary {
+        justify-self: center;
+      }
+      .page-scroll-controls {
+        right: max(12px, env(safe-area-inset-right));
+        bottom: max(12px, env(safe-area-inset-bottom));
+      }
+      .scroll-jump {
+        width: 42px;
+        height: 42px;
+      }
+    }
     @media (max-width: 640px) {
       .shell { padding-left: 10px; padding-right: 10px; }
-      .toolbar { position: static; }
-      .field, .field-grow { flex-basis: 100%; min-width: 100%; }
-      .toolbar .button { flex: 1 1 auto; }
       .table-meta { width: 100%; margin-left: 0; }
-      .chart { height: 320px; }
+      .header-theme-toggle {
+        position: static;
+        width: max-content;
+        margin: 10px 0 0;
+      }
+      .echarts-chart { height: 390px; min-height: 390px; }
     }
     @media print {
-      .report-nav, .toolbar, .filter-summary, .pagination, .table-tools { display: none !important; }
+      .report-nav, .report-toolbar, .filter-summary-panel, .pagination, .table-tools, .page-scroll-controls { display: none !important; }
       .shell { width: 100%; padding: 0; }
       details { break-inside: avoid; }
       details > * { display: block !important; }
-      .chart { break-inside: avoid; }
+      .chart-shell { break-inside: avoid; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      details.section,
+      details.section > summary,
+      details.report-item,
+      details.report-item > summary,
+      summary::before,
+      .details-content,
+      .shell,
+      .report-nav,
+      .nav-title,
+      .nav-title-text,
+      .nav-toggle::before,
+      .nav-tree,
+      .scroll-jump {
+        transition: none !important;
+      }
     }
   </style>
   <script>__ECHARTS_JS__</script>
 </head>
-<body>
+<body class="nav-collapsed">
   <aside class="report-nav" aria-label="Report contents">
     <div class="nav-title">
       <span class="nav-title-text">Contents</span>
-      <button id="navToggle" type="button" class="button nav-toggle" aria-label="Collapse contents" title="Collapse contents"></button>
+      <button id="navToggle" type="button" class="nav-toggle" aria-label="Expand contents" title="Expand contents"></button>
     </div>
     <nav id="navTree" class="nav-tree"></nav>
   </aside>
@@ -308,8 +867,8 @@
     <div class="shell">
       <h1 id="reportTitle">__TITLE__</h1>
       <div id="reportName" class="report-name"></div>
-      <div id="reportDescription" class="description"></div>
-      <div class="project-links" aria-label="Project links">
+      <div id="generatorInfo" class="runtime"></div>
+      <div class="runtime project-links" aria-label="Project links">
         <a class="project-link" href="https://github.com/O2eg/pg_perf_bench" target="_blank" rel="noopener noreferrer">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5h6.5a1 1 0 0 1 1 1V13"></path><path d="M4 2.5h6.5a1 1 0 0 1 1 1v9.5"></path><path d="M4 2.5A1.5 1.5 0 0 0 2.5 4v8A1.5 1.5 0 0 1 4 10.5h8.5"></path></svg>
           <span>github.com/O2eg/pg_perf_bench</span>
@@ -323,12 +882,19 @@
           <span>t.me/O2egg</span>
         </a>
       </div>
+      <div id="reportDescription" class="runtime"></div>
+      <div id="reportInvocation" class="runtime"></div>
+      <label class="theme-toggle header-theme-toggle" title="Switch report theme">
+        <span>Dark</span>
+        <input id="themeToggle" type="checkbox">
+        <span>Light</span>
+      </label>
     </div>
   </header>
 
   <main class="shell">
-    <div class="toolbar" aria-label="Report controls">
-      <label class="field field-grow">
+    <div class="report-toolbar" aria-label="Report controls">
+      <label class="field">
         <span>Find item</span>
         <input id="itemSearch" class="input" type="search" placeholder="Title, description or identifier">
       </label>
@@ -342,16 +908,22 @@
           <option value="link">Links</option>
         </select>
       </label>
-      <button id="expandAll" type="button" class="button">Expand all</button>
-      <button id="collapseAll" type="button" class="button">Collapse all</button>
-      <label class="theme-control" title="Switch report theme">
-        <input id="themeToggle" type="checkbox">
-        <span>Light theme</span>
-      </label>
     </div>
-    <div id="filterSummary" class="filter-summary"></div>
+    <div class="filter-summary-panel">
+      <div class="filter-summary-actions">
+        <button id="expandAll" type="button" class="button">Expand all</button>
+        <button id="collapseAll" type="button" class="button">Collapse all</button>
+      </div>
+      <span id="filterSummary"></span>
+      <span class="filter-summary-spacer" aria-hidden="true"></span>
+    </div>
     <div id="reportContent"></div>
   </main>
+
+  <div class="page-scroll-controls" aria-label="Page scroll controls">
+    <button id="scrollToTop" type="button" class="scroll-jump scroll-up" aria-label="Scroll to top" title="Scroll to top"></button>
+    <button id="scrollToBottom" type="button" class="scroll-jump scroll-down" aria-label="Scroll to bottom" title="Scroll to bottom"></button>
+  </div>
 
   <script id="pg-perf-bench-report" type="application/json">__PAYLOAD__</script>
   <script id="pg-perf-bench-third-party-licenses" type="text/plain">__THIRD_PARTY_LICENSES__</script>
@@ -361,10 +933,22 @@
       'use strict';
 
       const report = JSON.parse(document.getElementById('pg-perf-bench-report').textContent);
+      Object.values(report.sections || {}).forEach(section => {
+        if (section && typeof section.header === 'string') {
+          section.header = section.header.replace(/\s*<hn>\s*/gi, '').trim();
+        }
+      });
       const content = document.getElementById('reportContent');
       const navTree = document.getElementById('navTree');
       const charts = [];
+      const CHART_MIN_HEIGHT_PX = 470;
+      const CHART_PLOT_MIN_HEIGHT_PX = 330;
+      const CHART_LEGEND_ROW_HEIGHT_PX = 24;
+      const CHART_LEGEND_PADDING_PX = 18;
+      const DETAILS_ANIMATION_MS = 300;
+      let activeChartPanEntry = null;
       let renderedItems = 0;
+      let scrollControlsRaf = 0;
 
       const asText = value => {
         if (value === null || value === undefined) return '';
@@ -383,6 +967,13 @@
         if (className) node.className = className;
         if (text !== undefined) node.textContent = text;
         return node;
+      };
+      const wrapDetailsContent = contentNode => {
+        const shell = element('div', 'details-content');
+        const inner = element('div', 'details-content-inner');
+        inner.append(contentNode);
+        shell.append(inner);
+        return shell;
       };
 
       const addLabeledBlock = (parent, label, value) => {
@@ -435,6 +1026,31 @@
           return leftNumber - rightNumber;
         }
         return asText(left).localeCompare(asText(right), undefined, {numeric: true, sensitivity: 'base'});
+      };
+      const renderTableCell = value => {
+        const td = element('td');
+        const text = asText(value);
+        const isComplex = value !== null && typeof value === 'object';
+        const content = element(
+          isComplex ? 'pre' : 'div',
+          isComplex ? 'json-cell cell-content' : 'cell-content',
+          text,
+        );
+        td.append(content);
+        const likelyOverflow = text.split(/\r?\n/).length > 6 || text.length > 240;
+        if (likelyOverflow) {
+          const toggle = element('button', 'button ghost cell-toggle', 'Show more');
+          toggle.type = 'button';
+          toggle.addEventListener('click', () => {
+            const expanded = content.classList.toggle('expanded');
+            toggle.textContent = expanded ? 'Show less' : 'Show more';
+            requestPageScrollControlsUpdate();
+          });
+          td.append(toggle);
+        } else {
+          content.classList.add('expanded');
+        }
+        return td;
       };
 
       const renderTable = (parent, headers, rows) => {
@@ -530,9 +1146,7 @@
           pageRows.forEach(row => {
             const tr = element('tr');
             normalizedHeaders.forEach((_, index) => {
-              const td = element('td');
-              td.append(element('div', 'cell-value', asText(row[index])));
-              tr.append(td);
+              tr.append(renderTableCell(row[index]));
             });
             tbody.append(tr);
           });
@@ -572,92 +1186,593 @@
         }
       };
 
-      const chartOption = data => {
-        const dark = document.documentElement.dataset.theme !== 'light';
-        const series = Array.isArray(data && data.series) ? data.series : [];
-        const sourceType = data && data.chart && data.chart.type;
-        const chartKind = data && data.chart && data.chart.kind;
-        const xAxisType = data && data.xaxis && data.xaxis.type === 'datetime' ? 'time' : 'value';
+      const cssVar = name => getComputedStyle(document.documentElement)
+        .getPropertyValue(name)
+        .trim();
+
+      const chartTheme = () => ({
+        text: cssVar('--text'),
+        muted: cssVar('--muted'),
+        line: cssVar('--line'),
+        lineStrong: cssVar('--line-strong'),
+        panelSoft: cssVar('--panel-soft'),
+        panel: cssVar('--panel'),
+        inputBg: cssVar('--input-bg'),
+        accent: cssVar('--accent'),
+      });
+
+      const exportTheme = () => ({
+        text: '#21182f',
+        muted: '#62566f',
+        line: '#d7cfdf',
+        lineStrong: '#9b8da8',
+        panelSoft: '#f6f3f8',
+        panel: '#ffffff',
+        inputBg: '#ffffff',
+        chartBackground: '#ffffff',
+        accent: '#6d3fc0',
+      });
+
+      const normalizeChartSeries = data => {
+        const rawSeries = Array.isArray(data && data.series) ? data.series : [];
+        return rawSeries.map((source, sourceIndex) => ({
+          name: asText(source && source.name) || `Series ${sourceIndex + 1}`,
+          unit: asText(source && source.unit),
+          color: source && source.color ? asText(source.color) : '',
+          data: (Array.isArray(source && source.data) ? source.data : [])
+            .map(point => {
+              if (Array.isArray(point)) {
+                return {x: point[0], y: point[1] == null ? null : Number(point[1])};
+              }
+              if (point && typeof point === 'object') {
+                const x = point.x ?? point.t;
+                const rawY = point.y ?? point.value;
+                return {x, y: rawY == null ? null : Number(rawY)};
+              }
+              return null;
+            })
+            .filter(point => point && (point.y === null || Number.isFinite(point.y))),
+        }));
+      };
+
+      const chartColors = series => {
+        const defaults = [
+          '#efd05f', '#b38ee8', '#84c8e7', '#93d083', '#e98996', '#c7a0ee',
+          '#e7a764', '#73d2c5', '#c9ea5f', '#8f9ae8', '#d6b45d', '#aeb4bd',
+        ];
+        return series.map((source, index) => source.color || defaults[index % defaults.length]);
+      };
+
+      const chartKind = data => asText(data && data.chart && data.chart.kind) || 'line';
+      const chartSeriesType = data => (
+        (data && data.chart && data.chart.type === 'bar')
+        || ['bar', 'column', 'stacked_bar', 'stacked_column'].includes(chartKind(data))
+      ) ? 'bar' : 'line';
+      const chartXType = data => (
+        data && data.xaxis && data.xaxis.type === 'datetime' ? 'datetime' : 'category'
+      );
+      const chartUnit = (data, series) => (
+        asText(data && data.chart && data.chart.unit)
+        || asText(series.find(source => source.unit)?.unit)
+        || asText(data && data.yaxis && data.yaxis.title && data.yaxis.title.text)
+      );
+      const chartTitle = (data, unit) => {
+        const title = asText(data && data.title && data.title.text);
+        return unit && !title.endsWith(` [${unit}]`) ? `${title} [${unit}]` : title;
+      };
+      const chartLegendData = (series, kind) => {
+        const names = series.map(source => source.name);
+        return ['stacked_bar', 'stacked_column'].includes(kind) ? names.reverse() : names;
+      };
+      const chartLegendLayout = (entry, legendData) => {
+        const containerWidth = Math.max(
+          Number(entry.container.clientWidth) || Number(entry.shell.clientWidth) || 0,
+          640,
+        );
+        const width = Math.max(containerWidth - 36, 320);
+        let rows = 1;
+        let occupied = 0;
+        legendData.forEach(name => {
+          const estimated = Math.min(width, 48 + Array.from(name).length * 7);
+          if (occupied > 0 && occupied + estimated > width) {
+            rows += 1;
+            occupied = 0;
+          }
+          occupied += estimated;
+        });
+        const height = CHART_LEGEND_PADDING_PX + rows * CHART_LEGEND_ROW_HEIGHT_PX;
         return {
-          backgroundColor: 'transparent',
-          color: ['#f3d46b', '#8dd3c7', '#bebada', '#fb8072', '#80b1d3', '#fdb462', '#b3de69'],
-          textStyle: {color: dark ? '#f8f0ff' : '#2b1d38'},
-          title: {
-            text: data && data.title ? asText(data.title.text) : '',
-            left: 'center',
-            textStyle: {color: dark ? '#fff7d6' : '#2a1738', fontSize: 16},
+          width,
+          height,
+          chartHeight: Math.max(CHART_MIN_HEIGHT_PX, 68 + CHART_PLOT_MIN_HEIGHT_PX + height + 24),
+        };
+      };
+      const chartBounds = series => {
+        const values = series.flatMap(source => source.data)
+          .map(point => Date.parse(point.x))
+          .filter(Number.isFinite);
+        if (!values.length) return {};
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const padding = min === max ? 60000 : Math.max(Math.round((max - min) * 0.03), 1000);
+        return {min: min - padding, max: max + padding};
+      };
+      const formatChartTime = value => {
+        const timestamp = typeof value === 'number' ? value : Date.parse(value);
+        if (!Number.isFinite(timestamp)) return asText(value);
+        return [new Date(timestamp).getHours(), new Date(timestamp).getMinutes(), new Date(timestamp).getSeconds()]
+          .map(part => String(part).padStart(2, '0'))
+          .join(':');
+      };
+      const formatChartNumber = (value, unit) => {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) return asText(value);
+        const absolute = Math.abs(numeric);
+        const digits = absolute >= 100 ? 0 : absolute >= 10 ? 1 : 2;
+        return `${numeric.toFixed(digits)}${unit ? ` ${unit}` : ''}`;
+      };
+      const escapeChartText = value => asText(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+      const safeChartColor = value => {
+        const color = asText(value).trim();
+        return /^#[0-9a-f]{3,8}$/i.test(color) || /^(?:rgb|hsl)a?\([0-9.,%\s]+\)$/i.test(color)
+          ? color
+          : 'currentColor';
+      };
+      const chartTooltip = (params, unit, xType) => {
+        const points = Array.isArray(params) ? params : params ? [params] : [];
+        if (!points.length) return '';
+        const hoveredX = points[0].axisValue ?? (
+          Array.isArray(points[0].value) ? points[0].value[0] : points[0].name
+        );
+        const rows = points.map(point => {
+          const rawValue = Array.isArray(point.value) ? point.value[1] : point.value;
+          return {
+            index: Number(point.seriesIndex) || 0,
+            name: point.seriesName,
+            value: Number(rawValue),
+            color: safeChartColor(point.color),
+          };
+        }).filter(point => Number.isFinite(point.value))
+          .sort((left, right) => right.value - left.value || left.index - right.index)
+          .map(point => (
+            '<div class="pg-diag-chart-tooltip-row">'
+            + `<span class="pg-diag-chart-tooltip-marker" style="background:${point.color}"></span>`
+            + `<span class="pg-diag-chart-tooltip-label">${escapeChartText(point.name)}</span>`
+            + `<span class="pg-diag-chart-tooltip-value">${escapeChartText(formatChartNumber(point.value, unit))}</span>`
+            + '</div>'
+          )).join('');
+        const title = xType === 'datetime' ? formatChartTime(hoveredX) : asText(hoveredX);
+        return '<div class="pg-diag-chart-tooltip">'
+          + `<div class="pg-diag-chart-tooltip-title">${escapeChartText(title)}</div>`
+          + `<div class="pg-diag-chart-tooltip-rows">${rows}</div>`
+          + '</div>';
+      };
+
+      const chartOption = (entry, themeOverride = null, exporting = false) => {
+        const data = entry.data;
+        const series = entry.series;
+        const theme = themeOverride || chartTheme();
+        const kind = chartKind(data);
+        const type = chartSeriesType(data);
+        const stacked = ['stacked_bar', 'stacked_column', 'stacked_area'].includes(kind);
+        const area = ['area', 'stacked_area'].includes(kind);
+        const xType = chartXType(data);
+        const unit = chartUnit(data, series);
+        const colors = chartColors(series);
+        const legendData = chartLegendData(series, kind);
+        const legendLayout = chartLegendLayout(entry, legendData);
+        const bounds = xType === 'datetime' ? chartBounds(series) : {};
+        const categoryValues = series.length ? series[0].data.map(point => point.x) : [];
+        const isPercent = unit === '%' || unit === 'percent';
+        const renderedSeries = series.map((source, index) => ({
+          name: source.name,
+          type,
+          stack: stacked ? 'pg_diag_stack' : undefined,
+          data: source.data.map(point => (
+            xType === 'datetime' ? [Date.parse(point.x), point.y] : point.y
+          )),
+          smooth: type !== 'bar',
+          showSymbol: false,
+          connectNulls: false,
+          barMaxWidth: 48,
+          itemStyle: {
+            color: colors[index],
+            borderRadius: type === 'bar' ? [2, 2, 0, 0] : 0,
+            opacity: area && !stacked ? 0.9 : 1,
           },
-          tooltip: {trigger: 'axis', axisPointer: {type: 'cross'}},
+          lineStyle: {color: colors[index], width: area ? 1 : 2},
+          areaStyle: area ? {color: colors[index], opacity: stacked ? 0.82 : 0.24} : undefined,
+          emphasis: {focus: 'series'},
+        }));
+        return {
+          animation: !exporting,
+          animationDuration: 220,
+          backgroundColor: theme.chartBackground || 'transparent',
+          color: colors,
+          title: {
+            text: chartTitle(data, unit),
+            left: 16,
+            top: 12,
+            textStyle: {color: theme.text, fontSize: 15, fontWeight: 700},
+          },
+          grid: {
+            left: 18,
+            right: 26,
+            top: 68,
+            bottom: exporting ? legendLayout.height + 24 : 44,
+            containLabel: true,
+          },
           legend: {
-            type: 'scroll',
-            top: 32,
-            textStyle: {color: dark ? '#d8c8e8' : '#746286'},
+            show: exporting,
+            type: 'plain',
+            data: legendData,
+            left: 18,
+            width: legendLayout.width,
+            bottom: 8,
+            height: legendLayout.height,
+            orient: 'horizontal',
+            textStyle: {color: theme.text, fontSize: 12},
+            itemWidth: 20,
+            itemHeight: 10,
+            itemGap: 14,
           },
           toolbox: {
-            right: 12,
-            feature: {dataZoom: {}, restore: {}, saveAsImage: {pixelRatio: 2}},
+            show: !exporting,
+            right: 14,
+            top: 10,
+            itemSize: 17,
+            itemGap: 9,
+            iconStyle: {borderColor: theme.muted, borderWidth: 1.5},
+            emphasis: {iconStyle: {borderColor: theme.accent, borderWidth: 2}},
+            feature: {
+              dataZoom: {
+                title: {zoom: 'Select zoom', back: 'Undo zoom'},
+                xAxisIndex: [0],
+                yAxisIndex: 'none',
+              },
+              myPan: {
+                show: true,
+                title: entry.panEnabled ? 'Pan mode enabled - drag horizontally' : 'Pan by dragging',
+                icon: 'path://M5 11V8a1.5 1.5 0 0 1 3 0v2-4a1.5 1.5 0 0 1 3 0v4-5a1.5 1.5 0 0 1 3 0v5-3a1.5 1.5 0 0 1 3 0v7c0 4-2.5 7-7 7H9c-2.5 0-4-1-5.5-3L1 14a1.5 1.5 0 0 1 2.5-1.7L5 14z',
+                iconStyle: {
+                  borderColor: entry.panEnabled ? theme.accent : theme.muted,
+                  borderWidth: entry.panEnabled ? 2 : 1.5,
+                },
+                onclick: () => toggleChartPan(entry),
+              },
+              myZoomIn: {
+                show: true,
+                title: 'Zoom in',
+                icon: 'path://M10 3a7 7 0 1 0 0 14a7 7 0 1 0 0-14M15 15l6 6M10 6v8M6 10h8',
+                onclick: () => zoomChart(entry, 0.5),
+              },
+              myZoomOut: {
+                show: true,
+                title: 'Zoom out',
+                icon: 'path://M10 3a7 7 0 1 0 0 14a7 7 0 1 0 0-14M15 15l6 6M6 10h8',
+                onclick: () => zoomChart(entry, 2),
+              },
+              restore: {show: true, title: 'Reset zoom'},
+              myExport: {
+                show: true,
+                title: 'Export',
+                icon: 'path://M2 8h7V2h6v6h7L12 20z',
+                onclick: () => toggleChartExport(entry),
+              },
+            },
           },
-          grid: {left: 64, right: 30, top: 80, bottom: 65, containLabel: true},
-          dataZoom: [{type: 'inside'}, {type: 'slider', bottom: 14}],
+          tooltip: {
+            show: !exporting,
+            trigger: 'axis',
+            renderMode: 'html',
+            className: 'pg-diag-echarts-tooltip',
+            confine: true,
+            enterable: true,
+            hideDelay: 120,
+            backgroundColor: theme.panel,
+            borderColor: theme.line,
+            borderWidth: 1,
+            padding: 0,
+            textStyle: {color: theme.text},
+            axisPointer: {
+              type: type === 'bar' ? 'shadow' : 'cross',
+              lineStyle: {color: theme.muted},
+              crossStyle: {color: theme.muted},
+              label: {backgroundColor: theme.panelSoft, color: theme.text},
+            },
+            formatter: params => chartTooltip(params, unit, xType),
+          },
+          dataZoom: [{
+            type: 'inside',
+            xAxisIndex: 0,
+            start: entry.zoomRange.start,
+            end: entry.zoomRange.end,
+            filterMode: 'filter',
+            zoomOnMouseWheel: false,
+            moveOnMouseWheel: false,
+            moveOnMouseMove: false,
+            preventDefaultMouseMove: true,
+          }],
           xAxis: {
-            type: xAxisType,
-            name: data && data.xaxis && data.xaxis.title ? asText(data.xaxis.title.text) : '',
-            nameLocation: 'middle',
-            nameGap: 32,
-            axisLine: {lineStyle: {color: dark ? '#725a87' : '#c9b3df'}},
-            splitLine: {lineStyle: {color: dark ? '#342643' : '#efe2f8'}},
+            type: xType === 'datetime' ? 'time' : 'category',
+            data: xType === 'datetime' ? undefined : categoryValues,
+            min: bounds.min,
+            max: bounds.max,
+            boundaryGap: type === 'bar',
+            axisLabel: {
+              color: theme.muted,
+              rotate: xType === 'datetime' ? 0 : 35,
+              hideOverlap: true,
+              formatter: xType === 'datetime' ? formatChartTime : undefined,
+            },
+            axisLine: {lineStyle: {color: theme.line}},
+            axisTick: {lineStyle: {color: theme.line}},
+            splitLine: {show: false},
           },
           yAxis: {
             type: 'value',
-            name: data && data.yaxis && data.yaxis.title ? asText(data.yaxis.title.text) : '',
-            nameLocation: 'middle',
-            nameGap: 48,
-            axisLine: {lineStyle: {color: dark ? '#725a87' : '#c9b3df'}},
-            splitLine: {lineStyle: {color: dark ? '#342643' : '#efe2f8'}},
+            min: isPercent ? 0 : undefined,
+            max: isPercent ? 100 : undefined,
+            axisLabel: {color: theme.muted, formatter: value => formatChartNumber(value, '')},
+            axisLine: {show: false},
+            axisTick: {show: false},
+            splitLine: {lineStyle: {color: theme.line, opacity: 0.65}},
           },
-          series: series.map(seriesItem => ({
-            name: asText(seriesItem.name),
-            type: sourceType === 'bar' ? 'bar' : 'line',
-            data: Array.isArray(seriesItem.data) ? seriesItem.data : [],
-            stack: chartKind === 'stacked_area' ? 'total' : undefined,
-            areaStyle: chartKind === 'area' || chartKind === 'stacked_area' ? {} : undefined,
-            itemStyle: seriesItem.color ? {color: seriesItem.color} : undefined,
-            lineStyle: {
-              width: Number(data && data.stroke && data.stroke.width) || 2,
-              color: seriesItem.color || undefined,
-            },
-            smooth: Boolean(data && data.stroke && data.stroke.curve === 'smooth'),
-            symbolSize: 7,
-            showSymbol: xAxisType !== 'time',
-          })),
+          series: renderedSeries,
         };
       };
 
-      const renderChartData = (parent, data, ownerDetails) => {
+      const createChartLegend = entry => {
+        const panel = element('div', 'chart-legend-panel');
+        panel.setAttribute('role', 'group');
+        panel.setAttribute('aria-label', 'Chart series');
+        const colors = chartColors(entry.series);
+        chartLegendData(entry.series, chartKind(entry.data)).forEach(seriesName => {
+          const sourceIndex = entry.series.findIndex(source => source.name === seriesName);
+          const button = element('button', 'chart-legend-item');
+          button.type = 'button';
+          button.setAttribute('aria-pressed', 'true');
+          button.dataset.seriesName = seriesName;
+          button.title = seriesName;
+          const marker = element('span', 'chart-legend-marker');
+          marker.style.background = safeChartColor(colors[sourceIndex]);
+          button.append(marker, element('span', 'chart-legend-label', seriesName));
+          button.addEventListener('click', () => {
+            entry.chart.dispatchAction({type: 'legendToggleSelect', name: seriesName});
+          });
+          panel.append(button);
+        });
+        entry.chart.on('legendselectchanged', event => {
+          panel.querySelectorAll('.chart-legend-item').forEach(button => {
+            button.setAttribute(
+              'aria-pressed',
+              event.selected[button.dataset.seriesName] === false ? 'false' : 'true',
+            );
+          });
+        });
+        return panel;
+      };
+
+      const moveChartPan = event => {
+        const entry = activeChartPanEntry;
+        if (!entry || !entry.panDrag) return;
+        const span = entry.panDrag.range.end - entry.panDrag.range.start;
+        const shift = ((event.clientX - entry.panDrag.startX) / entry.panDrag.width) * span;
+        const start = Math.max(0, Math.min(100 - span, entry.panDrag.range.start - shift));
+        entry.zoomRange = {start, end: start + span};
+        entry.chart.dispatchAction({type: 'dataZoom', dataZoomIndex: 0, ...entry.zoomRange});
+        event.preventDefault();
+      };
+      const finishChartPan = () => {
+        if (!activeChartPanEntry) return;
+        activeChartPanEntry.panDrag = null;
+        activeChartPanEntry.chart.getZr().setCursorStyle(
+          activeChartPanEntry.panEnabled ? 'grab' : 'default',
+        );
+        activeChartPanEntry = null;
+        window.removeEventListener('mousemove', moveChartPan, true);
+      };
+      const bindChartPan = entry => {
+        entry.chart.getZr().on('mousedown', event => {
+          const nativeEvent = event.event || {};
+          const span = entry.zoomRange.end - entry.zoomRange.start;
+          if (!entry.panEnabled || span >= 99.999 || !entry.chart.containPixel(
+            {gridIndex: 0},
+            [event.offsetX, event.offsetY],
+          )) return;
+          entry.panDrag = {
+            startX: Number(nativeEvent.clientX),
+            width: Math.max(entry.chart.getWidth(), 1),
+            range: {...entry.zoomRange},
+          };
+          activeChartPanEntry = entry;
+          window.addEventListener('mousemove', moveChartPan, {capture: true, passive: false});
+          window.addEventListener('mouseup', finishChartPan, {capture: true, once: true});
+          entry.chart.getZr().setCursorStyle('grabbing');
+        });
+      };
+      const zoomChart = (entry, multiplier) => {
+        const center = (entry.zoomRange.start + entry.zoomRange.end) / 2;
+        const span = Math.min(
+          100,
+          Math.max(0.5, (entry.zoomRange.end - entry.zoomRange.start) * multiplier),
+        );
+        const start = Math.max(0, Math.min(100 - span, center - span / 2));
+        entry.zoomRange = {start, end: start + span};
+        entry.chart.dispatchAction({type: 'dataZoom', dataZoomIndex: 0, ...entry.zoomRange});
+      };
+      const toggleChartPan = entry => {
+        entry.panEnabled = !entry.panEnabled;
+        if (entry.panEnabled && entry.zoomRange.end - entry.zoomRange.start >= 99.999) {
+          zoomChart(entry, 0.8);
+        }
+        entry.chart.getZr().setCursorStyle(entry.panEnabled ? 'grab' : 'default');
+        entry.refresh();
+      };
+      const chartFileName = entry => slug(
+        entry.itemKey || (entry.data && entry.data.title && entry.data.title.text) || 'chart',
+      );
+      const downloadDataUrl = (url, fileName) => {
+        const link = element('a');
+        link.href = url;
+        link.download = fileName;
+        document.body.append(link);
+        link.click();
+        link.remove();
+      };
+      const csvCell = value => {
+        const text = asText(value);
+        return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+      };
+      const exportChartCsv = entry => {
+        const xValues = entry.series[0]?.data || [];
+        const rows = [['x', ...entry.series.map(source => source.name)]];
+        xValues.forEach((point, index) => {
+          rows.push([point.x, ...entry.series.map(source => source.data[index]?.y ?? '')]);
+        });
+        const blob = new Blob(
+          [rows.map(row => row.map(csvCell).join(',')).join('\r\n') + '\r\n'],
+          {type: 'text/csv;charset=utf-8'},
+        );
+        const url = URL.createObjectURL(blob);
+        downloadDataUrl(url, `${chartFileName(entry)}.csv`);
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+      };
+      const exportChartImage = (entry, format) => {
+        const width = Math.max(Math.round(entry.container.clientWidth), 640);
+        const layout = chartLegendLayout(
+          entry,
+          chartLegendData(entry.series, chartKind(entry.data)),
+        );
+        const exportNode = element('div');
+        Object.assign(exportNode.style, {
+          position: 'fixed',
+          left: '-100000px',
+          top: '0',
+          width: `${width}px`,
+          height: `${layout.chartHeight}px`,
+          visibility: 'hidden',
+        });
+        document.body.append(exportNode);
+        const exportChart = echarts.init(exportNode, null, {
+          renderer: format === 'png' ? 'canvas' : 'svg',
+          width,
+          height: layout.chartHeight,
+        });
+        try {
+          exportChart.setOption(chartOption(entry, exportTheme(), true), {notMerge: true});
+          downloadDataUrl(
+            exportChart.getDataURL({
+              type: format,
+              pixelRatio: format === 'png' ? 2 : 1,
+              backgroundColor: '#ffffff',
+              excludeComponents: ['toolbox'],
+            }),
+            `${chartFileName(entry)}.${format}`,
+          );
+        } finally {
+          exportChart.dispose();
+          exportNode.remove();
+        }
+      };
+      const createChartExportMenu = entry => {
+        const menu = element('div', 'chart-export-menu');
+        menu.hidden = true;
+        menu.setAttribute('role', 'menu');
+        ['svg', 'png', 'csv'].forEach(format => {
+          const button = element('button', '', `Export ${format.toUpperCase()}`);
+          button.type = 'button';
+          button.addEventListener('click', () => {
+            menu.hidden = true;
+            if (format === 'csv') exportChartCsv(entry);
+            else exportChartImage(entry, format);
+          });
+          menu.append(button);
+        });
+        return menu;
+      };
+      const closeChartExportMenus = except => {
+        charts.forEach(candidate => {
+          if (candidate !== except && candidate.exportMenu) candidate.exportMenu.hidden = true;
+        });
+      };
+      const toggleChartExport = entry => {
+        closeChartExportMenus(entry);
+        entry.exportMenu.hidden = !entry.exportMenu.hidden;
+        if (!entry.exportMenu.hidden) {
+          entry.exportMenu.querySelector('button').focus({preventScroll: true});
+        }
+      };
+
+      const renderChartData = (parent, data, ownerDetails, itemKey = '') => {
         if (!window.echarts) {
           parent.append(element('div', 'empty', 'Embedded ECharts library is unavailable.'));
           renderPlainText(parent, data);
           return;
         }
-        const chartNode = element('div', 'chart');
-        parent.append(chartNode);
+        const series = normalizeChartSeries(data);
+        if (!series.length) {
+          parent.append(element('div', 'empty', 'No chart data'));
+          return;
+        }
+        const shell = element('div', 'chart-shell');
+        const chartNode = element('div', 'echarts-chart');
+        shell.append(chartNode);
+        parent.append(shell);
         const chart = echarts.init(chartNode, null, {renderer: 'svg'});
-        const refresh = () => {
-          chart.setOption(chartOption(data), true);
+        const entry = {
+          chart,
+          shell,
+          container: chartNode,
+          ownerDetails,
+          data,
+          series,
+          itemKey,
+          ownerDetails,
+          zoomRange: {start: 0, end: 100},
+          panEnabled: false,
+          panDrag: null,
+          legendPanel: null,
+          exportMenu: null,
+        };
+        entry.refresh = () => {
+          const selected = ((((chart.getOption() || {}).legend) || [])[0] || {}).selected || {};
+          const options = chartOption(entry);
+          options.legend.selected = selected;
+          chart.setOption(options, {notMerge: true});
           chart.resize();
         };
-        charts.push({chart, refresh, ownerDetails});
-        if (ownerDetails.open) refresh();
+        chart.on('datazoom', event => {
+          const payload = event && Array.isArray(event.batch) ? event.batch[0] : event;
+          if (Number.isFinite(Number(payload && payload.start))
+              && Number.isFinite(Number(payload && payload.end))) {
+            entry.zoomRange = {start: Number(payload.start), end: Number(payload.end)};
+          }
+        });
+        chart.on('restore', () => {
+          entry.zoomRange = {start: 0, end: 100};
+        });
+        bindChartPan(entry);
+        entry.legendPanel = createChartLegend(entry);
+        entry.exportMenu = createChartExportMenu(entry);
+        shell.append(entry.legendPanel, entry.exportMenu);
+        charts.push(entry);
+        if (ownerDetails.open) entry.refresh();
         ownerDetails.addEventListener('toggle', () => {
-          if (ownerDetails.open) requestAnimationFrame(refresh);
+          if (ownerDetails.open) requestAnimationFrame(entry.refresh);
         });
       };
 
-      const renderChart = (parent, item, ownerDetails) => {
-        renderChartData(parent, item.data, ownerDetails);
+      const renderChart = (parent, item, ownerDetails, itemKey) => {
+        renderChartData(parent, item.data, ownerDetails, itemKey);
       };
 
-      const renderChartGroup = (parent, item, ownerDetails) => {
+      const renderChartGroup = (parent, item, ownerDetails, itemKey) => {
         const stack = element('div', 'chart-stack');
         parent.append(stack);
         const blocks = Array.isArray(item.data) ? item.data : [];
@@ -678,18 +1793,23 @@
             wrapper.append(element('div', 'chart-meta', block.errors.map(error => asText(error.message)).join('; ')));
           }
           stack.append(wrapper);
-          renderChartData(wrapper, block && block.chart ? block.chart : {}, ownerDetails);
+          renderChartData(
+            wrapper,
+            block && block.chart ? block.chart : {},
+            ownerDetails,
+            `${itemKey}-${asText(iteration.value)}`,
+          );
         });
       };
 
-      const renderItemBody = (body, item, ownerDetails) => {
+      const renderItemBody = (body, item, ownerDetails, itemKey) => {
         if (item.description && String(item.description).trim()) {
           body.append(element('p', 'item-description', asText(item.description)));
         }
         switch (item.item_type) {
           case 'table': renderTables(body, item); break;
-          case 'chart': renderChart(body, item, ownerDetails); break;
-          case 'chart_group': renderChartGroup(body, item, ownerDetails); break;
+          case 'chart': renderChart(body, item, ownerDetails, itemKey); break;
+          case 'chart_group': renderChartGroup(body, item, ownerDetails, itemKey); break;
           case 'link': renderLinks(body, item.data); break;
           default: renderPlainText(body, item.data); break;
         }
@@ -730,8 +1850,8 @@
           itemSummary.append(element('span', 'badge', item.item_type || 'plain_text'));
           itemDetails.append(itemSummary);
           const body = element('div', 'item-body');
-          renderItemBody(body, item, itemDetails);
-          itemDetails.append(body);
+          renderItemBody(body, item, itemDetails, reportKey);
+          itemDetails.append(wrapDetailsContent(body));
           sectionContent.append(itemDetails);
           renderedItems += 1;
 
@@ -743,7 +1863,7 @@
         if (!sectionContent.querySelector('.report-item')) {
           sectionContent.append(element('div', 'empty', 'No visible report items'));
         }
-        sectionDetails.append(sectionContent);
+        sectionDetails.append(wrapDetailsContent(sectionContent));
         content.append(sectionDetails);
         navSection.append(navItems);
         navTree.append(navSection);
@@ -752,7 +1872,180 @@
       if (!content.children.length) content.append(element('div', 'empty', 'The report has no visible sections.'));
       document.getElementById('reportTitle').textContent = report.header || report.report_name || 'pg_perf_bench report';
       document.getElementById('reportName').textContent = report.report_name ? `Report: ${report.report_name}` : '';
-      document.getElementById('reportDescription').textContent = report.description || '';
+      const generator = report.generator && typeof report.generator === 'object'
+        ? report.generator
+        : {};
+      document.getElementById('generatorInfo').textContent = generator.name
+        ? `${asText(generator.name)} version ${asText(generator.version)}`
+        : '';
+      document.getElementById('reportDescription').textContent = report.description
+        ? `started=${asText(report.description)}`
+        : '';
+      const invocation = report.invocation && typeof report.invocation === 'object'
+        ? report.invocation
+        : {};
+      const database = invocation.database && typeof invocation.database === 'object'
+        ? invocation.database
+        : {};
+      const workload = invocation.workload && typeof invocation.workload === 'object'
+        ? invocation.workload
+        : {};
+      const metrics = invocation.metrics && typeof invocation.metrics === 'object'
+        ? invocation.metrics
+        : {};
+      const safety = invocation.safety && typeof invocation.safety === 'object'
+        ? invocation.safety
+        : {};
+      const benchmarkRuns = Array.isArray(report.benchmark_runs) ? report.benchmark_runs : [];
+      const iterationParameter = workload.iteration_parameter
+        || benchmarkRuns[0]?.iteration?.parameter;
+      const iterationValues = Array.isArray(workload.iteration_values)
+        ? workload.iteration_values
+        : benchmarkRuns.map(run => run?.iteration?.value).filter(value => value != null);
+      const duration = workload.duration_seconds || benchmarkRuns[0]?.metrics?.duration_seconds;
+      const profile = workload.profile || report.workload_evidence?.profile_id;
+      const invocationParts = [
+        ['mode', invocation.mode || 'benchmark'],
+        ['connection', invocation.connection_type],
+        ['db_host', database.host],
+        ['db_port', database.port],
+        ['db', database.name],
+        ['db_user', database.user],
+        ['profile', profile],
+        ['scale', workload.scale],
+        [iterationParameter, iterationValues.length ? iterationValues.join(',') : null],
+        ['duration', duration == null ? null : `${duration}s`],
+        ['metrics', metrics.engine || report.benchmark_methodology?.system_metrics_engine],
+        [
+          'metrics_interval',
+          (metrics.interval_seconds ?? report.benchmark_methodology?.system_metrics_interval_seconds)
+            == null
+            ? null
+            : `${metrics.interval_seconds ?? report.benchmark_methodology.system_metrics_interval_seconds}s`,
+        ],
+        [
+          'reset_db',
+          safety.database_recreated_before_each_iteration
+            ?? report.benchmark_methodology?.database_recreated_before_each_iteration,
+        ],
+        [
+          'drop_os_caches',
+          safety.os_caches_dropped_before_each_iteration
+            ?? report.benchmark_methodology?.os_caches_dropped_before_each_iteration,
+        ],
+      ].filter(([, value]) => value !== null && value !== undefined && value !== '');
+      document.getElementById('reportInvocation').textContent = invocationParts.length
+        ? `parameters: ${invocationParts.map(([name, value]) => `${name}=${value}`).join(' ')}`
+        : '';
+
+      const scrollBehavior = () => (
+        matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+      );
+      const setScrollButtonVisible = (button, visible) => {
+        button.classList.toggle('visible', visible);
+        button.disabled = !visible;
+        button.setAttribute('aria-hidden', visible ? 'false' : 'true');
+        button.tabIndex = visible ? 0 : -1;
+      };
+      const updatePageScrollControls = () => {
+        const topButton = document.getElementById('scrollToTop');
+        const bottomButton = document.getElementById('scrollToBottom');
+        const root = document.documentElement;
+        const maxScroll = Math.max(0, root.scrollHeight - window.innerHeight);
+        const scrollTop = window.scrollY || root.scrollTop || document.body.scrollTop || 0;
+        const progress = maxScroll > 0 ? scrollTop / maxScroll : 1;
+        setScrollButtonVisible(topButton, scrollTop > 80);
+        setScrollButtonVisible(bottomButton, maxScroll > 80 && progress < 0.9);
+      };
+      const requestPageScrollControlsUpdate = () => {
+        if (scrollControlsRaf) return;
+        scrollControlsRaf = requestAnimationFrame(() => {
+          scrollControlsRaf = 0;
+          updatePageScrollControls();
+        });
+      };
+      const shouldReduceMotion = () => (
+        Boolean(window.matchMedia)
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      );
+      const directSummary = details => (
+        Array.from(details.children).find(child => child.tagName === 'SUMMARY') || null
+      );
+      const refreshChartsIn = details => {
+        requestAnimationFrame(() => {
+          charts.forEach(entry => {
+            if (details.contains(entry.container) && entry.ownerDetails.open) entry.refresh();
+          });
+        });
+      };
+      const cancelDetailsAnimation = details => {
+        if (details.__detailsRaf) {
+          cancelAnimationFrame(details.__detailsRaf);
+          details.__detailsRaf = 0;
+        }
+        if (details.__detailsTimer) {
+          clearTimeout(details.__detailsTimer);
+          details.__detailsTimer = 0;
+        }
+        details.classList.remove('is-opening', 'is-closing');
+      };
+      const finishDetailsAnimation = (details, isOpen) => {
+        details.__detailsTimer = 0;
+        details.__detailsRaf = 0;
+        if (!isOpen) details.open = false;
+        details.classList.remove('is-opening', 'is-closing');
+        if (isOpen) refreshChartsIn(details);
+        requestPageScrollControlsUpdate();
+      };
+      const setDetailsOpen = (details, shouldOpen, animate = true) => {
+        const isAnimating = Boolean(details.__detailsTimer)
+          || details.classList.contains('is-opening')
+          || details.classList.contains('is-closing');
+        if (details.open === shouldOpen && !isAnimating) return;
+        if (!directSummary(details) || !animate || shouldReduceMotion()
+            || details.classList.contains('hidden')) {
+          cancelDetailsAnimation(details);
+          details.open = shouldOpen;
+          if (shouldOpen) refreshChartsIn(details);
+          requestPageScrollControlsUpdate();
+          return;
+        }
+
+        cancelDetailsAnimation(details);
+        if (shouldOpen) {
+          details.classList.add('is-opening');
+          details.open = true;
+          details.__detailsRaf = requestAnimationFrame(() => {
+            details.__detailsRaf = 0;
+            details.classList.remove('is-opening');
+            details.__detailsTimer = setTimeout(
+              () => finishDetailsAnimation(details, true),
+              DETAILS_ANIMATION_MS,
+            );
+          });
+          return;
+        }
+
+        if (!details.open) {
+          finishDetailsAnimation(details, false);
+          return;
+        }
+        details.classList.add('is-closing');
+        details.__detailsTimer = setTimeout(
+          () => finishDetailsAnimation(details, false),
+          DETAILS_ANIMATION_MS,
+        );
+      };
+      const bindAnimatedDetails = () => {
+        document.querySelectorAll('details.section, details.report-item').forEach(details => {
+          const summary = directSummary(details);
+          if (!summary) return;
+          summary.addEventListener('click', event => {
+            event.preventDefault();
+            setDetailsOpen(details, !details.open, true);
+          });
+        });
+      };
 
       const applyFilters = () => {
         const query = document.getElementById('itemSearch').value.trim().toLowerCase();
@@ -767,20 +2060,25 @@
             if (matches) sectionVisible += 1;
           });
           section.classList.toggle('hidden', sectionVisible === 0);
-          if ((query || type) && sectionVisible) section.open = true;
+          if ((query || type) && sectionVisible) setDetailsOpen(section, true, true);
           visible += sectionVisible;
         });
-        document.getElementById('filterSummary').textContent = `Showing ${visible} of ${renderedItems} report items`;
+        document.getElementById('filterSummary').textContent = `Showing ${visible} from ${renderedItems}`;
+        requestPageScrollControlsUpdate();
       };
 
+      bindAnimatedDetails();
       document.getElementById('itemSearch').addEventListener('input', applyFilters);
       document.getElementById('typeFilter').addEventListener('change', applyFilters);
       document.getElementById('expandAll').addEventListener('click', () => {
-        document.querySelectorAll('details:not(.hidden)').forEach(item => { item.open = true; });
-        requestAnimationFrame(() => charts.forEach(item => item.refresh()));
+        document.querySelectorAll('details:not(.hidden)').forEach(item => {
+          setDetailsOpen(item, true, true);
+        });
       });
       document.getElementById('collapseAll').addEventListener('click', () => {
-        document.querySelectorAll('details').forEach(item => { item.open = false; });
+        document.querySelectorAll('details').forEach(item => {
+          setDetailsOpen(item, false, true);
+        });
       });
 
       const themeToggle = document.getElementById('themeToggle');
@@ -794,16 +2092,33 @@
         charts.forEach(item => item.refresh());
       });
 
+      document.getElementById('scrollToTop').addEventListener('click', () => {
+        window.scrollTo({top: 0, behavior: scrollBehavior()});
+      });
+      document.getElementById('scrollToBottom').addEventListener('click', () => {
+        window.scrollTo({top: document.documentElement.scrollHeight, behavior: scrollBehavior()});
+      });
+      document.addEventListener('pointerdown', event => {
+        if (!event.target.closest('.chart-export-menu')) closeChartExportMenus();
+      });
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') closeChartExportMenus();
+      });
+      window.addEventListener('scroll', requestPageScrollControlsUpdate, {passive: true});
       document.getElementById('navToggle').addEventListener('click', event => {
         document.body.classList.toggle('nav-collapsed');
         const collapsed = document.body.classList.contains('nav-collapsed');
         event.currentTarget.title = collapsed ? 'Expand contents' : 'Collapse contents';
         event.currentTarget.setAttribute('aria-label', event.currentTarget.title);
-        setTimeout(() => charts.forEach(item => item.chart.resize()), 240);
+        setTimeout(() => charts.forEach(item => item.chart.resize()), 320);
       });
-      window.addEventListener('resize', () => charts.forEach(item => item.chart.resize()));
+      window.addEventListener('resize', () => {
+        charts.forEach(item => item.chart.resize());
+        requestPageScrollControlsUpdate();
+      });
       if (window.hljs) document.querySelectorAll('pre code').forEach(node => hljs.highlightElement(node));
       applyFilters();
+      requestPageScrollControlsUpdate();
     })();
   </script>
 </body>
