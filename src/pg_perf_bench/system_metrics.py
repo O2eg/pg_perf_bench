@@ -104,6 +104,7 @@ def _echarts_data(metric: dict[str, Any], result: dict[str, Any]) -> dict[str, A
             'type': 'line',
             'kind': chart.get('kind', 'line'),
             'unit': chart.get('unit'),
+            'quantity': chart.get('quantity'),
         },
         'xaxis': {'type': 'datetime', 'title': {'text': 'Time'}},
         'yaxis': {'title': {'text': chart.get('unit') or ''}},

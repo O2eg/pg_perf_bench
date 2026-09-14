@@ -23,6 +23,9 @@ def test_benchmark_preserves_raw_evidence_and_redacts_password():
 duration: 10 s
 number of transactions actually processed: 100
 latency average = 1.25 ms
+latency stddev = 0.125 ms
+number of failed transactions: 0 (0.000%)
+number of transactions retried: 1 (1.000%)
 initial connection time = 2.50 ms
 tps = 80.75 (without initial connection time)
 """
@@ -47,6 +50,9 @@ tps = 80.75 (without initial connection time)
 
     evidence = asyncio.run(scenario())
     assert evidence['metrics']['tps'] == 80.75
+    assert evidence['metrics']['latency_stddev_ms'] == 0.125
+    assert evidence['metrics']['failed_transactions_percent'] == 0
+    assert evidence['metrics']['retried_transactions_percent'] == 1
     assert evidence['legacy_metrics'] == [4, 10, 100, 1.25, 2.5, 80.75]
     assert password not in str(evidence)
     assert evidence['workload']['stdout'] == pgbench_output

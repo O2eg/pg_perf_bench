@@ -17,6 +17,7 @@ PYTHON_COMMANDS = frozenset(
         'workload',
         'benchmark_result',
         'chart_tps',
+        'chart_pgbench_metric',
     }
 )
 

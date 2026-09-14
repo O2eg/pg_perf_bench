@@ -81,6 +81,7 @@ class ConnectionType(StrEnum):
     SSH = 'ssh'
     LOCAL = 'local'
     DOCKER = 'docker'
+    MANAGED = 'managed'
 
 
 @enum.unique

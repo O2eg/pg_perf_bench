@@ -66,6 +66,7 @@ selected target. The workload commands themselves run on the machine where
 | `local` | local machine | local machine |
 | `docker` | existing container | local machine through a published port |
 | `ssh` | remote host | local machine through an SSH local-forwarding port |
+| `--managed-pg-info FILE` | PostgreSQL protocol only; no host transport | local machine through the managed endpoint |
 
 This separation keeps workload generation independent of target management and
 makes the measured client location explicit.
@@ -253,8 +254,9 @@ commands. It must be longer than the expected command duration.
 | `ARG_PG_DATABASE` | `--database` |
 | `ARG_PGBENCH_PATH` | newest local pgbench, or validated `--pgbench-path` |
 | `ARG_PSQL_PATH` | matching local psql, or validated `--psql-path` |
-| `ARG_WORKLOAD_PATH` | `--workload-path` |
+| `ARG_WORKLOAD_PATH` | bundled profile directory, or `--workload-path` |
 | `ARG_WORKLOAD_SCALE` | `--workload-scale` |
+| `ARG_WORKLOAD_DURATION_SECONDS` | `--workload-duration-seconds`, or the profile's `default_duration_seconds` |
 | `ARG_PGBENCH_CLIENTS` | current client-axis value |
 | `ARG_PGBENCH_TIME` | current duration-axis value |
 
@@ -265,16 +267,228 @@ For a custom workload, use `--benchmark-type custom`, supply an existing
 `--workload-path`, and reference files below that path from the command
 templates.
 
-For a packaged maximum-TPS workload, use `--workload-profile imdb` or
-`--workload-profile pagila`, `--workload-scale SCALE`, and a
-`--pgbench-clients` sweep. `pg-perf-bench profiles` lists the installed
-collection. Each profile supplies its schema, deterministic Python generator,
-typical SQL query set and command templates. It deliberately does not reuse
-`pg_workload`'s scheduler-specific `profile.yml`.
+### Bundled workload profiles
+
+`pg-perf-bench profiles` lists the installed profiles, their default scale,
+duration and script count. Select one with `--workload-profile`; its schema,
+generator, setup and workload commands are supplied automatically.
+
+| Profile | Workload and default script weights | Default duration |
+|---|---|---:|
+| [`imdb`](src/pg_perf_bench/workload_profiles/imdb/README.md) | 38 analytical scripts over 21 tables; equal weights | 120 s |
+| [`pagila`](src/pg_perf_bench/workload_profiles/pagila/README.md) | OLTP: select / insert / update / delete = 50 / 25 / 20 / 5 | 60 s |
+| [`pagila-htap`](src/pg_perf_bench/workload_profiles/pagila-htap/README.md) | The same OLTP scripts plus reporting: 50 / 25 / 20 / 5 / 5 | 60 s |
+
+Weights describe selection of whole pgbench scripts, each of which can execute
+several SQL statements or transactions. The default HTAP reporting share is
+`5 / 105`, approximately 4.8 %. Its reported TPS includes all five scripts.
+
+| Setting | How to configure it |
+|---|---|
+| Data volume | `--workload-scale SCALE`, default `1`; positive fractional values such as `0.25` are accepted. Generators retain minimum table sizes at small scales. |
+| Concurrent clients | `--pgbench-clients 1,2,4,8,16`; each value gets a freshly recreated database. Bundled commands also use one pgbench job per client. |
+| Measured window per point | `--workload-duration-seconds 120`; overrides the profile default for every client count. |
+| Command time limit | `--command-timeout 300`; allow enough time for initialization and for the workload window plus completion of in-flight queries. |
+
+Bundled profiles require `--pgbench-clients`; `--pgbench-time` is rejected.
+They select benchmark type `custom` automatically. `--workload-path` cannot be
+combined with `--workload-profile`.
+
+For example, run the HTAP profile on a dedicated local benchmark instance
+(adjust connection and PostgreSQL paths to your environment):
+
+```bash
+PGPASSWORD=secret pg-perf-bench benchmark \
+  --connection-type local \
+  --allow-database-reset \
+  --host 127.0.0.1 --port 5432 --user postgres \
+  --database pg_perf_bench_test \
+  --pg-data-path /var/lib/postgresql/18/main \
+  --pg-bin-path /usr/lib/postgresql/18/bin \
+  --workload-profile pagila-htap \
+  --workload-scale 4 \
+  --workload-duration-seconds 120 \
+  --pgbench-clients 1,2,4,8,16 \
+  --command-timeout 300 \
+  --report-name pagila-htap-scale4
+```
+
+Use `--workload-profile pagila` for the OLTP baseline, or `imdb` for analytical
+joins. Keep scale, client counts and duration constant when comparing runs.
+Scale controls row counts, not a target size in bytes: IMDb scale 1 generates
+100,000 titles and 100,000 people; Pagila scale 1 generates 1,000 films,
+600 customers and 16,000 rentals. Choose data volume relative to the cache
+being tested; the profile READMEs describe the datasets in more detail.
+
+The schemas support PostgreSQL 10–18. Generators use deterministic `hashint8()`
+streams; IMDb uses separate streams for related identifiers and attributes to
+avoid correlated, degenerate joins. Pagila initializes indexes, identifier
+bounds and statistics, and sets `search_path` for the database and the benchmark
+role within it. No manual role configuration is needed for the supplied commands.
+Generated values are reproducible; service timestamps such as Pagila's
+`last_update` use the current time.
+
+Bundled commands use `--random-seed=42`, and both Pagila variants use
+`-M prepared`. A fixed seed makes random choices repeatable with the same
+client configuration, but a timed run can complete a different number of
+scripts; it does not guarantee identical observed mix proportions or TPS.
+These profiles use `profile.json`, independently of `pg_workload`'s
+scheduler-specific `profile.yml`.
+
+### Changing script weights or pgbench options
+
+Keep `--workload-profile` and supply `--workload-command` to replace only its
+measured command. The packaged initialization still runs, and
+`ARG_WORKLOAD_PATH` still points to the packaged profile directory.
+`--init-command` can similarly replace the initialization command.
+
+For example, append this option to the HTAP command above to change the
+reporting weight from 5 to 25, making its target share `25 / 125 = 20 %`:
+
+```bash
+--workload-command 'ARG_PGBENCH_PATH --no-vacuum --random-seed=42 -M prepared -c ARG_PGBENCH_CLIENTS -j ARG_PGBENCH_CLIENTS -T ARG_WORKLOAD_DURATION_SECONDS -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER -f ARG_WORKLOAD_PATH/sql/01_select.sql@50 -f ARG_WORKLOAD_PATH/sql/02_insert.sql@25 -f ARG_WORKLOAD_PATH/sql/03_update.sql@20 -f ARG_WORKLOAD_PATH/sql/04_delete.sql@5 -f ARG_WORKLOAD_PATH/sql/05_reporting.sql@25 ARG_PG_DATABASE'
+```
+
+The replacement is a complete command: include every script you want to run.
+Use `-f FILE@WEIGHT` for relative weights; omit a file to remove it from the mix.
+Set pgbench options such as `--random-seed`, `-M` and `-j` in this command;
+there are no separate profile CLI flags for them. Retain the client and duration
+placeholders when those values should follow the benchmark settings.
+
+### Editing SQL or the data generator
+
+Copy the complete profile directory to the workload-generator host and edit
+that copy. Using Python from the environment where `pg-perf-bench` is installed:
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+from shutil import copytree
+import pg_perf_bench
+
+source = Path(pg_perf_bench.__file__).parent / 'workload_profiles' / 'pagila-htap'
+copytree(source, 'workloads/pagila-local')
+PY
+```
+
+Edit `generator.py` to change data distributions. Adjust the probabilities in
+`sql/02_insert.sql` to change the frequency of customer, catalogue and staff changes.
+Edit the SQL scripts for query behavior. The copied `profile.json` contains
+the command templates, including the script list and weights.
+
+Use `--benchmark-type custom --workload-path` for the copy. A custom path does
+not automatically apply commands or defaults from `profile.json`: pass both command templates explicitly,
+and set the duration explicitly if they use `ARG_WORKLOAD_DURATION_SECONDS`.
+The following reads your edited templates and runs them:
+
+```bash
+workload_init=$(python3 -c 'import json; print(json.load(open("workloads/pagila-local/profile.json"))["benchmark"]["init_command"])')
+workload_run=$(python3 -c 'import json; print(json.load(open("workloads/pagila-local/profile.json"))["benchmark"]["workload_command"])')
+
+PGPASSWORD=secret pg-perf-bench benchmark \
+  --connection-type local \
+  --allow-database-reset \
+  --host 127.0.0.1 --port 5432 --user postgres \
+  --database pg_perf_bench_test \
+  --pg-data-path /var/lib/postgresql/18/main \
+  --pg-bin-path /usr/lib/postgresql/18/bin \
+  --benchmark-type custom \
+  --workload-path ./workloads/pagila-local \
+  --workload-scale 4 \
+  --workload-duration-seconds 120 \
+  --pgbench-clients 1,2,4,8,16 \
+  --init-command "$workload_init" \
+  --workload-command "$workload_run" \
+  --command-timeout 300 \
+  --report-name pagila-local-scale4
+```
+
+To validate a configured command without touching PostgreSQL, insert `plan`
+before `benchmark`: `pg-perf-bench plan benchmark ...`.
+
+### Profile files and parameters in reports
+
+Both JSON and HTML reports retain the effective initialization and workload
+commands for every iteration, together with scale, duration, client counts and
+CLI arguments. This includes overridden script weights, seed, jobs and other
+pgbench options. Passwords are redacted.
+
+For bundled profiles, `workload_evidence.files` contains every file listed in
+the manifest and `profile.json` itself. For a local profile, the report also
+captures the other files under `--workload-path`, including JSON, YAML, TOML,
+shell scripts and configuration files without extensions. The local manifest's
+`files` entries supply file roles; they do not select commands or defaults.
+Git/Mercurial/Subversion metadata, `.venv`, `venv`, `__pycache__`, `.pyc` and
+`.pyo` are excluded from automatic traversal. Keep reports, generated datasets
+and unrelated files outside the profile directory.
+
+Literal input paths passed to psql or pgbench with `-f FILE`, `-fFILE`,
+`--file FILE` or `--file=FILE` are captured too, including external SQL used by
+an overridden command and pgbench's `FILE@WEIGHT` form. External files are
+identified by absolute path in the report; prefer absolute paths in commands.
+Relative file arguments are resolved from the directory where the benchmark
+was launched. Dependencies opened inside SQL, Python or shell code should be
+kept in the local profile directory: arbitrary shell expansion and runtime
+dependency discovery are not performed.
+
+Captured files must already exist, be UTF-8 text and be no larger than 5 MiB
+each; symlinks are rejected. Their content and SHA-256 are stored in the report
+and contribute to both definition and execution hashes. In HTML, open
+**Workload initialization and configuration** for the manifest, schema,
+generator and supporting files, and **pgbench workload** for workload SQL.
+
+### Managed PostgreSQL
+
+Pass `--managed-pg-info FILE` to benchmark an instance whose operating system
+and PostgreSQL service are controlled by a cloud provider. The option selects
+managed mode automatically; `--connection-type`, `--pg-data-path` and
+`--pg-bin-path` are not required. The local `pgbench` and `psql` clients still
+need to be installed.
+
+The metadata file can have **any format**: JSON, YAML, plain text, PDF, an image
+or another binary format. Its format is not parsed or used to configure the
+connection. Include the provider, region, instance class, CPU/RAM, storage and
+relevant service settings in it. The complete file, its name, size and SHA-256
+are embedded as `managed_pg_info` in JSON and HTML. The file contents are displayed
+directly as `plain_text` under **Managed PostgreSQL instance**. Binary content is
+stored and displayed as Base64, with an explicit encoding note.
+The file hash also participates in the execution plan and environment identity.
+
+For example:
+
+```bash
+PGPASSWORD=secret PGSSLMODE=require pg-perf-bench benchmark \
+  --managed-pg-info ./cloud-instance.yaml \
+  --host db.example.cloud --port 5432 --user bench_owner \
+  --database pg_perf_bench_test --allow-database-reset \
+  --workload-profile pagila-htap --workload-scale 0.1 \
+  --workload-duration-seconds 30 --pgbench-clients 1,2,4 \
+  --command-timeout 120 --report-name managed-pagila
+```
+
+Use the TLS settings required by your provider; `PGSSLMODE` and `PGSSLROOTCERT`
+apply to the database connections and local client tools.
+
+Managed mode measures TPS, latency, transaction counts and client connection
+time, retains the complete workload evidence, and collects PostgreSQL version,
+settings and extensions through SQL using the supplied role. It recreates the
+dedicated benchmark database before each iteration, so the role needs
+`CREATEDB`, access to the `postgres` maintenance database and ownership of the
+benchmark database. `--allow-database-reset` remains mandatory.
+
+The utility does not restart the server, flush filesystems, drop OS caches,
+install `postgresql.conf`, read server logs or run the OS sampler. Host facts,
+OS metrics, `PostgreSQL pg_config` and server logs explicitly show
+`No data. Managed PostgreSQL.` These expected limitations have status
+`unsupported`; actual SQL or workload failures remain errors. Managed mode
+cannot be combined with SSH/Docker transport, `--pg-custom-config` or
+`--drop-os-caches`. `--collect-pg-logs` retains the unavailable-data marker.
+Custom workload commands execute exactly as supplied and must themselves be
+compatible with the provider's permissions.
 
 ### Iteration lifecycle
 
-For each axis value the backend:
+For each axis value in the regular mode, the backend:
 
 1. verifies access to the PostgreSQL instance;
 2. drops the dedicated benchmark database;
@@ -382,10 +596,12 @@ A benchmark report contains:
 - a compatibility preflight containing the PostgreSQL server major, the newest
   local pgbench/psql versions and the supported server range 10–18;
 - raw initialization and workload evidence for every completed iteration;
-- parsed clients, duration, transaction count, average latency, initial
-  connection time, and TPS;
+- parsed clients, duration, transaction count, average latency, latency standard
+  deviation, failed/retried transaction percentages, initial connection time, and TPS;
 - an explicit `maximum_tps` point with its axis value and complete metrics;
-- a TPS chart for the selected axis;
+- separate charts for TPS, average transaction latency, transaction latency
+  standard deviation, failed/retried transaction percentages and initial
+  connection time, all using the selected client or duration axis;
 - all `pg_diag` OS charts collected during every measured iteration: CPU
   utilization/load, RAM usage/pressure, disk throughput/IOPS/utilization/latency,
   and network throughput/packets;
@@ -394,6 +610,14 @@ A benchmark report contains:
 - item-level collection status and diagnostic reason;
 - an optional PostgreSQL log archive reference backed by the report-local
   `db_logs/` directory.
+
+Optional metrics are taken from the overall pgbench summary. Percentages retain
+the values reported by pgbench. Retry statistics require `--max-tries` other than
+1; latency standard deviation requires timing statistics (for example,
+`--progress`); `--connect` reports average connection time instead of initial
+connection time. Absent values remain `null`, appear as gaps, and display an
+explicit no-data message when an entire chart is unavailable. A reported zero
+remains a zero. Joined reports include a series per source for these charts.
 
 The JSON and HTML files are written through temporary files and atomically
 renamed into place. Report names cannot contain path separators, `.`/`..`, or a

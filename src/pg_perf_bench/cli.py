@@ -100,11 +100,11 @@ def _add_service_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--clear-logs', action='store_true')
 
 
-def _add_host_args(parser: argparse.ArgumentParser) -> None:
+def _add_host_args(parser: argparse.ArgumentParser, *, required: bool = True) -> None:
     parser.add_argument(
         '--connection-type',
-        choices=[str(value) for value in ConnectionType],
-        required=True,
+        choices=[str(value) for value in ConnectionType if value != ConnectionType.MANAGED],
+        required=required,
     )
     parser.add_argument('--command-timeout', type=positive_float, default=300.0)
     parser.add_argument('--pg-data-path')
@@ -173,8 +173,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     benchmark = subparsers.add_parser('benchmark', help='Run pgbench and collect evidence')
     _add_service_args(benchmark)
-    _add_host_args(benchmark)
+    _add_host_args(benchmark, required=False)
     _add_database_args(benchmark, include_custom_config=True)
+    benchmark.add_argument(
+        '--managed-pg-info',
+        metavar='FILE',
+        help='managed PostgreSQL mode: embed this metadata file and use database access only',
+    )
     benchmark.add_argument(
         '--benchmark-type',
         choices=[str(value) for value in WorkloadTypes],
@@ -336,6 +341,7 @@ def capabilities() -> dict[str, Any]:
                 'mutates_target': True,
                 'machine_output': True,
                 'accepts_plan_hash': True,
+                'managed_pg_info_option': '--managed-pg-info',
             },
             'collect-sys-info': {
                 'mutates_target': False,
@@ -462,6 +468,9 @@ def _runtime_plan(config: RuntimeConfig) -> dict[str, Any]:
         ),
         'postgresql_config': _input_descriptor(
             config.workload.pg_custom_config if config.workload is not None else None
+        ),
+        'managed_pg_info': _input_descriptor(
+            config.workload.managed_pg_info if config.workload is not None else None
         ),
     }
     return {

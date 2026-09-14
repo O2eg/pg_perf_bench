@@ -7,6 +7,7 @@ from pathlib import Path
 from pg_perf_bench.const import get_datetime_report, get_default_report_name
 from pg_perf_bench.join_catalog import load_join_task
 from pg_perf_bench.log import display_user_configuration
+from pg_perf_bench.report.commands import update_metric_chart_status
 from pg_perf_bench.report.processing import parse_json_in_order
 
 
@@ -161,6 +162,9 @@ class ReportJoiner:
         """
         ref_steps, _ = parse_json_in_order(ref_rep)
         cmp_steps, _ = parse_json_in_order(cmp_rep)
+        # Result charts are derived output and may differ between report versions.
+        ref_steps = [step for step in ref_steps if step['section'] != 'result']
+        cmp_steps = [step for step in cmp_steps if step['section'] != 'result']
         if len(ref_steps) != len(cmp_steps):
             raise ValueError('Different step counts')
 
@@ -180,9 +184,6 @@ class ReportJoiner:
         for i, (s1, s2) in enumerate(zip(ref_steps, cmp_steps, strict=True)):
             if s1['section'] != s2['section'] or s1['report'] != s2['report']:
                 raise ValueError(f'Step mismatch at {i}')
-            # Skip result section comparison.
-            if s1['section'] == 'result':
-                continue
 
             left = s1['report_obj'].get('data')
             right = s2['report_obj'].get('data')
@@ -261,6 +262,36 @@ class ReportJoiner:
         source_label = source_label or inc.get('report_name', 'Unnamed')
         chart_series = base_result['chart']['data']['series']
         inc_series = inc_result['chart']['data']['series']
+        metric_charts = dict.fromkeys(
+            key
+            for results in (base_result, inc_result)
+            for key, item in results.items()
+            if item.get('metric_key')
+        )
+        for key in metric_charts:
+            if key not in base_result:
+                base_result[key] = copy.deepcopy(inc_result[key])
+                base_result[key]['data']['series'] = [
+                    {'name': series['name'], 'data': [[point[0], None] for point in series['data']]}
+                    for series in chart_series
+                ]
+            incoming = inc_result.get(key)
+            optional_series = (
+                incoming['data']['series']
+                if incoming
+                else [
+                    {'data': [[point[0], None] for point in series['data']]}
+                    for series in inc_series
+                ]
+            )
+            for series in optional_series:
+                base_result[key]['data']['series'].append(
+                    {
+                        **copy.deepcopy(series),
+                        'name': source_label,
+                    }
+                )
+            update_metric_chart_status(base_result[key])
         for incoming_series in inc_series:
             series = copy.deepcopy(incoming_series)
             series['name'] = source_label
@@ -411,9 +442,10 @@ class ReportJoiner:
                 return None
         try:
             ref_result = ReportJoiner._result_reports(ref)
-            ref_chart = ref_result['chart']['data']['series']
-            for series in ref_chart:
-                series['name'] = source_labels[0]
+            for key, item in ref_result.items():
+                if key == 'chart' or item.get('metric_key'):
+                    for series in item['data']['series']:
+                        series['name'] = source_labels[0]
             ref_pgbench = ref_result['pgbench_outputs']
             ref_pgbench['data'] = [
                 [

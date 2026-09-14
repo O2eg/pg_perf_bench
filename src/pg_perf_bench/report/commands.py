@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -12,6 +13,8 @@ from pg_perf_bench.const import (
     WorkloadTypes,
 )
 from pg_perf_bench.contracts import redact_mapping
+from pg_perf_bench.managed import mark_managed_unavailable
+from pg_perf_bench.pgbench_metrics import LEGACY_METRIC_KEYS
 from pg_perf_bench.report.processing import parse_json_in_order
 
 
@@ -258,11 +261,13 @@ def workload_parse(report_data, item, phase='workload'):
     """
     evidence = report_data.get('workload_evidence')
     if isinstance(evidence, dict) and isinstance(evidence.get('files'), list):
-        expected_roles = {'schema', 'generator', 'setup'} if phase == 'init' else {'query'}
         selected = [
             source
             for source in evidence['files']
-            if isinstance(source, dict) and source.get('role') in expected_roles
+            if isinstance(source, dict)
+            and (
+                source.get('role') != 'query' if phase == 'init' else source.get('role') == 'query'
+            )
         ]
         item['data'] = '\n\n'.join(
             f'[{source["role"]}] {source["path"]} ({source["hash"]}):\n{source["content"]}'
@@ -388,16 +393,20 @@ def chart_tps(report_data, item):
         return
 
     param_name = report_data['workload_conf'].get('pgbench_iter_name', 'iteration')
+    axis_title = {
+        'pgbench_clients': 'Clients',
+        'pgbench_time': 'Duration [s]',
+    }.get(param_name, param_name)
     report_name = report_data.get('report_conf', {}).get('report_name', 'N/A')
 
     # build the chart structure in 'item["data"]'
     item['data'].update(
         {
-            'title': {'text': f'tps({param_name})'},
-            'xaxis': {'title': {'text': param_name}},
+            'title': {'text': 'Transactions per second'},
+            'xaxis': {'title': {'text': axis_title}},
             'series': [
                 {
-                    'name': f'{report_name},tps',
+                    'name': report_name,
                     'data': [
                         [x, round(val[5], 1)]
                         for x, val in zip(iter_list, outputs, strict=True)
@@ -418,6 +427,71 @@ def chart_tps(report_data, item):
         item['reason'] = f'TPS could not be plotted for {missing_points} benchmark iteration(s)'
     else:
         item['collection_status'] = 'ok' if points else 'empty'
+
+
+def update_metric_chart_status(item):
+    """Retain missing points and explain optional metrics absent from pgbench output."""
+    points = [point for series in item['data']['series'] for point in series['data']]
+    missing = sum(point[1] is None for point in points)
+    item.pop('reason', None)
+    item['data'].pop('missing_data_message', None)
+    if not points or missing == len(points):
+        item['collection_status'] = 'empty'
+        item['reason'] = 'No data. This metric was not reported by pgbench.'
+        item['data']['missing_data_message'] = item['reason']
+    elif missing:
+        item['collection_status'] = 'partial'
+        item['reason'] = f'pgbench did not report this metric for {missing} point(s).'
+        item['data']['missing_data_message'] = item['reason']
+    else:
+        item['collection_status'] = 'ok'
+
+
+def chart_pgbench_metric(report_data, item):
+    """Build an optional summary metric chart across the configured benchmark iterations."""
+    workload_conf = report_data.get('workload_conf', {})
+    iterations = workload_conf.get('pgbench_iter_list')
+    runs = report_data.get('benchmark_runs')
+    metric_key = item['metric_key']
+    if runs is None:
+        # Older callers still provide only the six-column pgbench table.
+        runs = [
+            {'metrics': dict(zip(LEGACY_METRIC_KEYS, row, strict=False))}
+            for row in report_data.get('pgbench_outputs', [])
+        ]
+    if (
+        not isinstance(iterations, list)
+        or not isinstance(runs, list)
+        or len(iterations) != len(runs)
+    ):
+        item.update(collection_status='error', reason='Missing or misaligned benchmark iterations')
+        return
+    points = []
+    for axis_value, run in zip(iterations, runs, strict=True):
+        value = run.get('metrics', {}).get(metric_key)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
+            value = None
+        points.append([axis_value, value])
+    parameter = workload_conf.get('pgbench_iter_name', 'iteration')
+    item['data']['xaxis'] = {
+        'title': {
+            'text': {
+                'pgbench_clients': 'Clients',
+                'pgbench_time': 'Duration [s]',
+            }.get(parameter, parameter)
+        }
+    }
+    item['data']['series'] = [
+        {
+            'name': report_data.get('report_conf', {}).get('report_name', 'N/A'),
+            'data': points,
+        }
+    ]
+    update_metric_chart_status(item)
 
 
 async def collect_logs(
@@ -472,6 +546,7 @@ PYTHON_REPORT_COMMANDS = {
     'workload': workload,
     'benchmark_result': benchmark_result,
     'chart_tps': chart_tps,
+    'chart_pgbench_metric': chart_pgbench_metric,
 }
 
 
@@ -497,6 +572,12 @@ async def execute_steps_in_order(logger, command_steps, report_data, conn, db) -
         if not report_obj:
             if logger:
                 logger.warning("Missing 'report_obj' in step. Skipping.")
+            continue
+
+        if report_data.get('managed_postgresql') and (
+            cmd_type == 'shell_command' or section_name == 'system'
+        ):
+            mark_managed_unavailable(report_obj)
             continue
 
         try:

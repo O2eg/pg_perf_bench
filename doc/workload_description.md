@@ -34,6 +34,7 @@ to find maximum TPS for one fixed dataset, query mix and environment.
 | `ARG_PSQL_PATH` | same-major local psql, or validated `--psql-path` |
 | `ARG_WORKLOAD_PATH` | `--workload-path` |
 | `ARG_WORKLOAD_SCALE` | `--workload-scale` |
+| `ARG_WORKLOAD_DURATION_SECONDS` | `--workload-duration-seconds`, or the profile's `default_duration_seconds` |
 | `ARG_PGBENCH_CLIENTS` | current client-axis value |
 | `ARG_PGBENCH_TIME` | current duration-axis value |
 
@@ -67,10 +68,16 @@ responsible for referencing the required files.
 
 ## Bundled maximum-TPS profiles
 
-`pg-perf-bench profiles` lists the packaged `imdb` analytical and `pagila`
-mixed-OLTP profiles. Each includes a SQL schema, deterministic Python data
-generator and pgbench query set. Select one without copying its command
-templates:
+`pg-perf-bench profiles` lists the packaged `imdb` analytical, `pagila` pure-OLTP
+and `pagila-htap` mixed (OLTP plus reporting) profiles. Each includes a SQL schema, deterministic Python data
+generator and pgbench query set. The generators avoid `random()`/`setseed()`,
+whose sequences differ between PostgreSQL 10–11, 12–14 and 15+, so the dataset
+for a given scale is identical on every supported server major and the
+`compare-postgresql-major` join stays controlled. pgbench script selection uses a
+fixed `--random-seed`, so identical runs execute the same script sequence and
+mix-composition noise stays out of comparisons. `--workload-duration-seconds`
+overrides each profile's default window (60 s `pagila`, 120 s `imdb`). Select one
+without copying its command templates:
 
 ```bash
 pg-perf-bench benchmark \
@@ -106,14 +113,37 @@ For every completed init and workload command the report records:
 - UTC start time;
 - elapsed seconds;
 - iteration index, axis name, and axis value;
-- parsed pgbench clients, duration, transaction count, average latency,
-  initial connection time, and TPS.
+- parsed pgbench clients, duration, transaction count, average latency, latency
+  standard deviation, failed/retried transaction percentages, initial connection
+  time, and TPS.
+
+The result section contains separate charts for TPS and the five latency,
+failure/retry and initial connection metrics. Only the overall pgbench summary
+is used; per-script statistics are excluded. Optional fields absent from a run
+remain `null`, rather than zero, and charts show gaps or an explicit no-data
+message. Percentages are preserved as printed by pgbench. JOIN includes these
+charts with a separate series for each source report.
 
 The top-level `workload_evidence` object also embeds the complete SQL schema,
 setup and query files, full Python generator source, profile manifest, source
 hashes, scale, command templates, exact resolved commands, pgbench/psql paths,
 and client-axis values. Definition and execution hashes let JOIN scenarios
 verify workload identity without relying on external files.
+
+Local profile directories also contribute their other UTF-8 files, including
+configuration files and `profile.json`; its `files` entries supply roles without
+applying its command templates or defaults. VCS metadata, virtual environments
+(`.venv`, `venv`) and Python caches are excluded from automatic traversal.
+Literal psql/pgbench `-f` and `--file` inputs are included even outside the
+profile directory, with pgbench `@weight` suffixes removed from file paths.
+Relative file arguments are resolved from the benchmark's launch directory;
+use absolute paths for external files. Dependencies opened indirectly by code
+must be kept under the local profile directory. Files must exist before the
+run, be UTF-8 text, be at most 5 MiB each and not be symlinks.
+
+All captured file contents affect both workload hashes. HTML displays the
+manifest and supporting files under **Workload initialization and configuration**
+and the query sources under **pgbench workload**.
 
 The report also records an explicit `maximum_tps` object containing the winning
 axis value and its complete latency/transaction metrics. A joined report keeps
@@ -123,6 +153,15 @@ If TPS cannot be parsed, raw output is retained and the result/chart items are
 marked partial.
 
 ## Reproducibility checklist
+
+With `--managed-pg-info FILE`, the benchmark runs through the PostgreSQL endpoint
+without a host transport or server paths. Database recreation and workload
+execution remain enabled; service restarts, filesystem/cache operations, OS
+sampling and server log collection are disabled. Their report items contain
+`No data. Managed PostgreSQL.` with status `unsupported`. The metadata file is
+embedded intact and displayed directly as `plain_text`; binary content is stored
+and displayed as Base64 with an encoding note. See the README's **Managed
+PostgreSQL** example for required permissions and connection settings.
 
 - Use a dedicated disposable database and stable PostgreSQL configuration.
 - Keep the workload generator, network path, scale factor, and non-axis flags

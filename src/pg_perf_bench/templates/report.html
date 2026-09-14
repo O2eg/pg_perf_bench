@@ -598,6 +598,21 @@
       scrollbar-color: var(--line-strong) var(--panel-soft);
       overscroll-behavior: contain;
     }
+    .chart-legend-panel::-webkit-scrollbar {
+      width: 10px;
+    }
+
+    .chart-legend-panel::-webkit-scrollbar-track {
+      background: var(--panel-soft);
+      border-radius: 5px;
+    }
+
+    .chart-legend-panel::-webkit-scrollbar-thumb {
+      border: 2px solid var(--panel-soft);
+      border-radius: 5px;
+      background: var(--line-strong);
+    }
+
     .chart-legend-item {
       box-sizing: border-box;
       display: inline-flex;
@@ -693,6 +708,9 @@
       padding: 5px 0;
       overflow-x: hidden;
       overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
+      touch-action: pan-y;
     }
     .pg-diag-chart-tooltip-row {
       display: grid;
@@ -1256,6 +1274,108 @@
         || asText(series.find(source => source.unit)?.unit)
         || asText(data && data.yaxis && data.yaxis.title && data.yaxis.title.text)
       );
+      // Keep chart units consistent with pg_diag's axes, tooltips and exports.
+      function chartAxisScale(series, unit, quantity, stacked) {
+        let maximum = 0;
+        if (stacked) {
+          const totals = new Map();
+          for (const entry of series || []) {
+            for (const point of entry.data || []) {
+              totals.set(point.x, (totals.get(point.x) || 0) + Math.abs(Number(point.y) || 0));
+            }
+          }
+          for (const total of totals.values()) maximum = Math.max(maximum, total);
+        } else {
+          for (const entry of series || []) {
+            for (const point of entry.data || []) {
+              maximum = Math.max(maximum, Math.abs(Number(point.y) || 0));
+            }
+          }
+        }
+        if (unit === "bytes" || unit === "bytes/s") {
+          const labels = unit === "bytes/s"
+            ? ["B/s", "KiB/s", "MiB/s", "GiB/s", "TiB/s", "PiB/s", "EiB/s"]
+            : ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
+          let factor = 1;
+          let index = 0;
+          while (maximum >= factor * 1024 && index < labels.length - 1) {
+            factor *= 1024;
+            index += 1;
+          }
+          return {factor, label: labels[index]};
+        }
+        const scalableUnit = chartScalableUnitLabel(unit, quantity);
+        if (scalableUnit) {
+          const prefixes = ["", "k", "M", "G", "T", "P"];
+          let factor = 1;
+          let index = 0;
+          while (maximum >= factor * 1000 && index < prefixes.length - 1) {
+            factor *= 1000;
+            index += 1;
+          }
+          return {factor, label: prefixes[index] + scalableUnit};
+        }
+        const labels = {
+          percent: "%",
+          "%": "%",
+          ratio: "ratio",
+          ms: "ms",
+          "ms/s": "ms/s",
+          milliseconds: "ms",
+          "milliseconds/s": "ms/s",
+          seconds: "s",
+          load: "load",
+        };
+        return {factor: 1, label: labels[unit] || unit || ""};
+      }
+
+      function chartScalableUnitLabel(unit, quantity) {
+        if (unit === "count" || unit === "count/s") {
+          const quantityLabel = String(quantity || "count").replace(/_/g, " ");
+          return unit === "count" ? quantityLabel : quantityLabel + "/s";
+        }
+        if (unit === "operations/s") {
+          return "ops/s";
+        }
+        if (unit === "iops") {
+          return "IOPS";
+        }
+        if (unit === "hertz") {
+          return "Hz";
+        }
+        const scalableUnits = new Set([
+          "backends",
+          "bits/s",
+          "blocks",
+          "blocks/s",
+          "calls",
+          "calls/s",
+          "connections",
+          "connections/s",
+          "deadlocks",
+          "events",
+          "events/s",
+          "files",
+          "files/s",
+          "packets/s",
+          "records",
+          "records/s",
+          "rows",
+          "rows/s",
+          "scans",
+          "scans/s",
+          "sessions",
+          "sessions/s",
+          "transactions",
+          "transactions/s",
+          "tuples",
+          "tuples/s",
+          "tx/s",
+        ]);
+        return scalableUnits.has(unit) ? unit : "";
+      }
+
+
       const chartTitle = (data, unit) => {
         const title = asText(data && data.title && data.title.text);
         return unit && !title.endsWith(` [${unit}]`) ? `${title} [${unit}]` : title;
@@ -1304,13 +1424,38 @@
           .map(part => String(part).padStart(2, '0'))
           .join(':');
       };
-      const formatChartNumber = (value, unit) => {
-        const numeric = Number(value);
-        if (!Number.isFinite(numeric)) return asText(value);
-        const absolute = Math.abs(numeric);
-        const digits = absolute >= 100 ? 0 : absolute >= 10 ? 1 : 2;
-        return `${numeric.toFixed(digits)}${unit ? ` ${unit}` : ''}`;
-      };
+      function formatChartAxisValue(value, unit, scale) {
+        if (!Number.isFinite(Number(value))) {
+          return "";
+        }
+        const numeric = Number(value) / Number((scale || {}).factor || 1);
+        return formatDecimalValue(numeric, unit === "percent" || unit === "%" ? 2 : 3);
+      }
+
+      function formatChartTooltipValue(value, unit, scale) {
+        if (!Number.isFinite(Number(value))) {
+          return "";
+        }
+        const numeric = Number(value) / Number((scale || {}).factor || 1);
+        const label = String((scale || {}).label || "");
+        const formatted = formatDecimalValue(
+          numeric,
+          unit === "percent" || unit === "%" ? 2 : 3,
+        );
+        if (!label) {
+          return formatted;
+        }
+        return label === "%" ? formatted + label : formatted + " " + label;
+      }
+
+      function formatDecimalValue(value, maxDigits) {
+        return new Intl.NumberFormat("en-US", {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: maxDigits,
+          useGrouping: true,
+        }).format(value);
+      }
+
       const escapeChartText = value => asText(value)
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
@@ -1323,7 +1468,7 @@
           ? color
           : 'currentColor';
       };
-      const chartTooltip = (params, unit, xType) => {
+      const chartTooltip = (params, unit, xType, scale) => {
         const points = Array.isArray(params) ? params : params ? [params] : [];
         if (!points.length) return '';
         const hoveredX = points[0].axisValue ?? (
@@ -1334,7 +1479,7 @@
           return {
             index: Number(point.seriesIndex) || 0,
             name: point.seriesName,
-            value: Number(rawValue),
+            value: rawValue == null ? NaN : Number(rawValue),
             color: safeChartColor(point.color),
           };
         }).filter(point => Number.isFinite(point.value))
@@ -1343,7 +1488,7 @@
             '<div class="pg-diag-chart-tooltip-row">'
             + `<span class="pg-diag-chart-tooltip-marker" style="background:${point.color}"></span>`
             + `<span class="pg-diag-chart-tooltip-label">${escapeChartText(point.name)}</span>`
-            + `<span class="pg-diag-chart-tooltip-value">${escapeChartText(formatChartNumber(point.value, unit))}</span>`
+            + `<span class="pg-diag-chart-tooltip-value">${escapeChartText(formatChartTooltipValue(point.value, unit, scale))}</span>`
             + '</div>'
           )).join('');
         const title = xType === 'datetime' ? formatChartTime(hoveredX) : asText(hoveredX);
@@ -1362,7 +1507,9 @@
         const stacked = ['stacked_bar', 'stacked_column', 'stacked_area'].includes(kind);
         const area = ['area', 'stacked_area'].includes(kind);
         const xType = chartXType(data);
+        const xAxisTitle = asText(data.xaxis?.title?.text);
         const unit = chartUnit(data, series);
+        const axisScale = chartAxisScale(series, unit, data.chart?.quantity, stacked);
         const colors = chartColors(series);
         const legendData = chartLegendData(series, kind);
         const legendLayout = chartLegendLayout(entry, legendData);
@@ -1377,7 +1524,8 @@
             xType === 'datetime' ? [Date.parse(point.x), point.y] : point.y
           )),
           smooth: type !== 'bar',
-          showSymbol: false,
+          showSymbol: Boolean(data.chart?.show_points),
+          symbolSize: 6,
           connectNulls: false,
           barMaxWidth: 48,
           itemStyle: {
@@ -1395,7 +1543,7 @@
           backgroundColor: theme.chartBackground || 'transparent',
           color: colors,
           title: {
-            text: chartTitle(data, unit),
+            text: chartTitle(data, axisScale.label),
             left: 16,
             top: 12,
             textStyle: {color: theme.text, fontSize: 15, fontWeight: 700},
@@ -1404,7 +1552,7 @@
             left: 18,
             right: 26,
             top: 68,
-            bottom: exporting ? legendLayout.height + 24 : 44,
+            bottom: (exporting ? legendLayout.height + 24 : 44) + (xAxisTitle ? 20 : 0),
             containLabel: true,
           },
           legend: {
@@ -1485,7 +1633,7 @@
               crossStyle: {color: theme.muted},
               label: {backgroundColor: theme.panelSoft, color: theme.text},
             },
-            formatter: params => chartTooltip(params, unit, xType),
+            formatter: params => chartTooltip(params, unit, xType, axisScale),
           },
           dataZoom: [{
             type: 'inside',
@@ -1500,6 +1648,10 @@
           }],
           xAxis: {
             type: xType === 'datetime' ? 'time' : 'category',
+            name: xAxisTitle,
+            nameLocation: 'middle',
+            nameGap: 36,
+            nameTextStyle: {color: theme.muted, fontSize: 12},
             data: xType === 'datetime' ? undefined : categoryValues,
             min: bounds.min,
             max: bounds.max,
@@ -1513,15 +1665,31 @@
             axisLine: {lineStyle: {color: theme.line}},
             axisTick: {lineStyle: {color: theme.line}},
             splitLine: {show: false},
+            axisPointer: {
+              label: {
+                backgroundColor: theme.panelSoft,
+                color: theme.text,
+                formatter: params => xType === 'datetime'
+                  ? formatChartTime(params.value)
+                  : asText(params.value),
+              },
+            },
           },
           yAxis: {
             type: 'value',
             min: isPercent ? 0 : undefined,
             max: isPercent ? 100 : undefined,
-            axisLabel: {color: theme.muted, formatter: value => formatChartNumber(value, '')},
+            axisLabel: {color: theme.muted, formatter: value => formatChartAxisValue(value, unit, axisScale)},
             axisLine: {show: false},
             axisTick: {show: false},
             splitLine: {lineStyle: {color: theme.line, opacity: 0.65}},
+            axisPointer: {
+              label: {
+                backgroundColor: theme.panelSoft,
+                color: theme.text,
+                formatter: params => formatChartAxisValue(params.value, unit, axisScale),
+              },
+            },
           },
           series: renderedSeries,
         };
@@ -1709,6 +1877,30 @@
         }
       };
 
+      function enableChartTooltipScrolling(container) {
+        container.addEventListener("wheel", (event) => {
+          const target = event.target instanceof Element ? event.target : null;
+          const rows = target ? target.closest(".pg-diag-chart-tooltip-rows") : null;
+          if (!rows) {
+            return;
+          }
+          const scale = event.deltaMode === 1
+            ? 16
+            : event.deltaMode === 2
+              ? rows.clientHeight
+              : 1;
+          const maximum = Math.max(rows.scrollHeight - rows.clientHeight, 0);
+          const next = Math.min(Math.max(rows.scrollTop + event.deltaY * scale, 0), maximum);
+          if (next === rows.scrollTop) {
+            return;
+          }
+          rows.scrollTop = next;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }, {capture: true, passive: false});
+      }
+
+
       const renderChartData = (parent, data, ownerDetails, itemKey = '') => {
         if (!window.echarts) {
           parent.append(element('div', 'empty', 'Embedded ECharts library is unavailable.'));
@@ -1716,14 +1908,18 @@
           return;
         }
         const series = normalizeChartSeries(data);
-        if (!series.length) {
-          parent.append(element('div', 'empty', 'No chart data'));
+        if (!series.some(source => source.data.some(point => point.y !== null))) {
+          parent.append(element('div', 'empty', data?.missing_data_message || 'No chart data'));
           return;
+        }
+        if (data?.missing_data_message) {
+          parent.append(element('p', 'chart-meta', asText(data.missing_data_message)));
         }
         const shell = element('div', 'chart-shell');
         const chartNode = element('div', 'echarts-chart');
         shell.append(chartNode);
         parent.append(shell);
+        enableChartTooltipScrolling(shell);
         const chart = echarts.init(chartNode, null, {renderer: 'svg'});
         const entry = {
           chart,

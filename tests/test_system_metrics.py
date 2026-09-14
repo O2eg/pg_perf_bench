@@ -7,10 +7,19 @@ from pg_perf_bench.join import ReportJoiner
 from pg_perf_bench.report.processing import get_report_structure
 from pg_perf_bench.system_metrics import (
     OS_METRIC_IDS,
+    _echarts_data,
     build_system_metrics_section,
     collect_system_metrics,
     infer_pgbench_duration,
 )
+
+
+def test_chart_quantity_survives_pg_diag_conversion():
+    data = _echarts_data(
+        {'title': 'Requests'},
+        {'chart': {'unit': 'count/s', 'quantity': 'requests'}, 'series': []},
+    )
+    assert data['chart']['quantity'] == 'requests'
 
 
 def test_duration_is_inferred_from_modern_and_short_pgbench_options():

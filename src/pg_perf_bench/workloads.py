@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import shlex
 from pathlib import Path
 from typing import Any
 
 from pg_perf_bench.const import WORKLOAD_PROFILES_PATH
-from pg_perf_bench.contracts import canonical_hash, file_hash
+from pg_perf_bench.contracts import canonical_hash
 
 WORKLOAD_PROFILE_SCHEMA_VERSION = 'pg_perf_bench/workload-profile-v1'
 WORKLOAD_EVIDENCE_SCHEMA_VERSION = 'pg_perf_bench/workload-evidence-v1'
 WORKLOAD_CATALOG_SCHEMA_VERSION = 'pg_perf_bench/workload-catalog-v1'
-_SOURCE_SUFFIXES = frozenset({'.py', '.sql'})
+_IGNORED_SOURCE_DIRS = frozenset({'.git', '.hg', '.svn', '.venv', 'venv', '__pycache__'})
+_IGNORED_SOURCE_SUFFIXES = frozenset({'.pyc', '.pyo'})
 _MAX_SOURCE_BYTES = 5 * 1024 * 1024
 
 
@@ -159,32 +162,40 @@ def _manifest_file_roles(profile: dict[str, Any] | None) -> dict[str, str]:
         'setup': 'setup',
         'queries': 'query',
     }
-    for role, values in profile['files'].items():
+    files = profile.get('files', {})
+    if not isinstance(files, dict):
+        raise ValueError('workload profile files must be an object')
+    for role, values in files.items():
+        if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
+            raise ValueError(f'workload profile files.{role} must be a list of paths')
         for value in values:
-            roles[value] = singular.get(role, role)
+            roles[_safe_relative_path(value).as_posix()] = singular.get(role, role)
     return roles
 
 
-def _source_paths(root: Path, profile: dict[str, Any] | None) -> list[Path]:
+def _source_paths(root: Path, profile: dict[str, Any] | None, *, bundled: bool) -> list[Path]:
     if root.is_file():
-        if root.suffix.lower() not in _SOURCE_SUFFIXES:
-            raise ValueError(f'unsupported workload source file: {root}')
         return [root]
     if not root.is_dir():
         raise ValueError(f'workload path does not exist: {root}')
+    paths = {root / value for value in _manifest_file_roles(profile)}
     if profile is not None:
-        paths = [
-            root / _safe_relative_path(value)
-            for values in profile['files'].values()
-            for value in values
-        ]
-        paths.append(root / 'profile.json')
-        return sorted(paths)
-    return sorted(
-        path
-        for path in root.rglob('*')
-        if path.is_file() and path.suffix.lower() in _SOURCE_SUFFIXES
-    )
+        paths.add(root / 'profile.json')
+    if not bundled:
+
+        def visit(directory: Path) -> None:
+            for path in directory.iterdir():
+                if path.name in _IGNORED_SOURCE_DIRS:
+                    continue
+                if path.is_symlink():
+                    raise ValueError(f'workload source must not be a symlink: {path}')
+                if path.is_dir():
+                    visit(path)
+                elif path.suffix.lower() not in _IGNORED_SOURCE_SUFFIXES:
+                    paths.add(path)
+
+        visit(root)
+    return sorted(paths)
 
 
 def _embedded_source(root: Path, path: Path, roles: dict[str, str]) -> dict[str, Any]:
@@ -196,11 +207,14 @@ def _embedded_source(root: Path, path: Path, roles: dict[str, str]) -> dict[str,
         raise ValueError(f'workload source escapes root: {path}') from exc
     if path.is_symlink():
         raise ValueError(f'workload source must not be a symlink: {path}')
+    if not resolved.is_file():
+        raise ValueError(f'workload source must be an existing regular file: {path}')
     size = resolved.stat().st_size
     if size > _MAX_SOURCE_BYTES:
         raise ValueError(f'workload source exceeds {_MAX_SOURCE_BYTES} bytes: {path}')
     try:
-        content = resolved.read_text(encoding='utf-8')
+        data = resolved.read_bytes()
+        content = data.decode('utf-8')
     except UnicodeDecodeError as exc:
         raise ValueError(f'workload source is not UTF-8 text: {path}') from exc
     relative_name = relative.as_posix()
@@ -210,18 +224,73 @@ def _embedded_source(root: Path, path: Path, roles: dict[str, str]) -> dict[str,
         'path': relative_name,
         'role': 'manifest'
         if is_manifest
-        else roles.get(relative_name, 'generator' if suffix == '.py' else 'query'),
-        'media_type': (
-            'application/json'
-            if is_manifest
-            else 'text/x-python'
-            if suffix == '.py'
-            else 'application/sql'
+        else roles.get(
+            relative_name,
+            'generator' if suffix == '.py' else 'query' if suffix == '.sql' else 'asset',
         ),
-        'size_bytes': size,
-        'hash': file_hash(resolved),
+        'media_type': {
+            '.json': 'application/json',
+            '.py': 'text/x-python',
+            '.sql': 'application/sql',
+            '.yaml': 'application/yaml',
+            '.yml': 'application/yaml',
+            '.toml': 'application/toml',
+            '.sh': 'text/x-shellscript',
+        }.get(suffix, 'text/plain'),
+        'size_bytes': len(data),
+        'hash': 'sha256:' + hashlib.sha256(data).hexdigest(),
         'content': content,
     }
+
+
+def _command_source_paths(command: str, workload_conf: dict[str, Any]) -> list[Path]:
+    """Find literal psql/pgbench file arguments without executing shell code."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    tokens = list(lexer)
+    client_paths = {'pgbench': True, 'psql': False}
+    for key in ('pgbench_path', 'psql_path'):
+        if workload_conf.get(key):
+            client_paths[str(workload_conf[key])] = key == 'pgbench_path'
+    paths = []
+    pgbench = False
+    postgres_client = False
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        index += 1
+        if token in {';', '&&', '||', '|', '&', '(', ')'}:
+            postgres_client = False
+            pgbench = False
+            continue
+        client = token if token in client_paths else Path(token).name
+        if not postgres_client and client in client_paths:
+            postgres_client = True
+            pgbench = client_paths[client]
+            continue
+        if not postgres_client:
+            continue
+        if token in {'-f', '--file'}:
+            if index == len(tokens):
+                raise ValueError(f'missing workload file after {token}')
+            value = tokens[index]
+            index += 1
+        elif token.startswith('--file='):
+            value = token[len('--file=') :]
+        elif token.startswith('-f'):
+            value = token[2:]
+        else:
+            continue
+        if pgbench:
+            name, separator, weight = value.rpartition('@')
+            if separator and weight.isdigit():
+                value = name
+        if value == '-':  # stdin is supplied by the surrounding command
+            continue
+        if not value:
+            raise ValueError('workload file argument must not be empty')
+        paths.append(Path(value).expanduser().absolute())
+    return paths
 
 
 def build_workload_evidence(
@@ -231,19 +300,26 @@ def build_workload_evidence(
     profile_id = workload_conf.get('workload_profile')
     profile = load_workload_profile(str(profile_id)) if profile_id else None
     raw_root = workload_conf.get('workload_path')
+    sources = []
+    source_by_path = {}
+    roles = {}
     if raw_root:
         root = Path(str(raw_root)).expanduser()
-        sources = [
-            _embedded_source(root, path, _manifest_file_roles(profile))
-            for path in _source_paths(root, profile)
-        ]
-    else:
-        sources = []
+        manifest_path = root / 'profile.json'
+        if profile is None and manifest_path.is_file():
+            profile = json.loads(manifest_path.read_text(encoding='utf-8'))
+            if not isinstance(profile, dict):
+                raise ValueError(f'workload profile must be an object: {manifest_path}')
+        roles = _manifest_file_roles(profile)
+        for path in _source_paths(root, profile, bundled=bool(profile_id)):
+            source = _embedded_source(root, path, roles)
+            sources.append(source)
+            source_by_path[path.resolve()] = source
     if profile is None:
         init_template = str(workload_conf.get('init_command') or '')
         workload_template = str(workload_conf.get('workload_command') or '')
         for source in sources:
-            if source['role'] == 'generator':
+            if source['role'] != 'query':
                 continue
             if source['path'] in init_template:
                 source['role'] = 'schema'
@@ -251,6 +327,20 @@ def build_workload_evidence(
                 source['role'] = 'query'
             else:
                 source['role'] = 'asset'
+    for commands in load_iterations:
+        for phase, command in zip(('schema', 'query'), commands, strict=True):
+            for path in _command_source_paths(command, workload_conf):
+                source = source_by_path.get(path.resolve())
+                if source is None:
+                    source = _embedded_source(path.parent, path, {})
+                    source['path'] = path.as_posix()
+                    source['role'] = phase
+                    source['external'] = True
+                    sources.append(source)
+                    source_by_path[path.resolve()] = source
+                elif not profile_id and source['path'] not in roles:
+                    source['role'] = phase
+    sources.sort(key=lambda source: source['path'])
     source_fingerprints = [
         {key: source[key] for key in ('path', 'role', 'size_bytes', 'hash')} for source in sources
     ]

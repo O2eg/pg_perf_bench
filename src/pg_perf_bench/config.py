@@ -17,6 +17,7 @@ from pg_perf_bench.const import (
     WorkMode,
 )
 from pg_perf_bench.errors import ConfigurationError
+from pg_perf_bench.managed import read_managed_pg_info
 from pg_perf_bench.workloads import load_workload_profile
 
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 5.0
@@ -128,6 +129,8 @@ class HostConfig:
         *,
         start_if_stopped: bool = False,
     ) -> dict[str, Any]:
+        if self.connection_type == ConnectionType.MANAGED:
+            return {}
         env = {'ARG_PG_BIN_PATH': self.pg_bin_path or ''}
         if self.connection_type == ConnectionType.LOCAL:
             return {'env': env, 'command_timeout': self.command_timeout}
@@ -189,6 +192,7 @@ class WorkloadConfig:
     drop_os_caches: bool = False
     system_metrics_interval: float = 1.0
     system_metrics_duration: float | None = None
+    managed_pg_info: str | None = None
 
     def as_legacy_dict(self, host: HostConfig) -> dict[str, Any]:
         return {
@@ -210,6 +214,7 @@ class WorkloadConfig:
             'drop_os_caches': self.drop_os_caches,
             'system_metrics_interval': self.system_metrics_interval,
             'system_metrics_duration': self.system_metrics_duration,
+            'managed_pg_info': self.managed_pg_info,
         }
 
 
@@ -245,9 +250,22 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
             raw_args=values,
         )
 
+    managed_pg_info = values.get('managed_pg_info')
+    if managed_pg_info:
+        metadata = read_managed_pg_info(managed_pg_info)
+        managed_pg_info = metadata['path']
+        if values.get('connection_type') not in (None, str(ConnectionType.LOCAL)):
+            raise ConfigurationError('--managed-pg-info cannot be combined with SSH or Docker')
+        for option in ('pg_custom_config', 'drop_os_caches', 'container_name', 'ssh_host'):
+            if values.get(option):
+                raise ConfigurationError(
+                    '--managed-pg-info cannot be combined with --' + option.replace('_', '-')
+                )
     try:
         connection_type = ConnectionType(
-            _required(values.get('connection_type'), '--connection-type')
+            ConnectionType.MANAGED
+            if managed_pg_info
+            else _required(values.get('connection_type'), '--connection-type')
         )
     except ValueError as exc:
         raise ConfigurationError(
@@ -271,9 +289,9 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
 
     pg_data_path = values.get('pg_data_path')
     pg_bin_path = values.get('pg_bin_path')
-    if mode == WorkMode.BENCHMARK:
+    if mode == WorkMode.BENCHMARK and not managed_pg_info:
         _required(pg_data_path, '--pg-data-path')
-    if needs_database:
+    if needs_database and not managed_pg_info:
         _required(pg_bin_path, '--pg-bin-path')
 
     ssh_key_value = values.get('ssh_key')
@@ -390,6 +408,7 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
             workload_duration_seconds=workload_duration_seconds,
             pg_custom_config=custom_config,
             allow_database_reset=True,
+            managed_pg_info=managed_pg_info,
             drop_os_caches=bool(values.get('drop_os_caches')),
             system_metrics_interval=_positive_float(
                 values.get('system_metrics_interval', 1.0),

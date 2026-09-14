@@ -5,7 +5,7 @@
     "sections": {
         "system": {
             "header": "System properties",
-            "description": "Common info about current host",
+            "description": "Operating system and hardware",
             "state": "expanded",
             "reports": {
                 "uname_a": {
@@ -217,8 +217,8 @@
             }
         },
         "db": {
-            "header": "Common database info",
-            "description": "Common info about current database",
+            "header": "Database",
+            "description": "PostgreSQL version and configuration",
             "state": "expanded",
             "reports": {
                 "full_version": {
@@ -271,21 +271,21 @@
             }
         },
         "benchmark": {
-            "header": "Common benchmark info",
-            "description": "Common info about current benchmark",
+            "header": "Benchmark configuration",
+            "description": "Run arguments, workload commands and profile files",
             "state": "expanded",
             "reports": {
-                 "args": {
-                     "header": "benchmark arguments info",
-                     "description": "Arguments configured by the user",
-                     "state": "collapsed",
-                     "item_type": "table",
-                     "python_command": "args",
-                     "theader": [],
-                     "data": []
-                 },
+                "args": {
+                    "header": "Benchmark arguments",
+                    "description": "Arguments configured by the user",
+                    "state": "collapsed",
+                    "item_type": "table",
+                    "python_command": "args",
+                    "theader": [],
+                    "data": []
+                },
                 "options": {
-                    "header": "pgbench options info",
+                    "header": "pgbench options",
                     "description": "Benchmark load configuration parameters for pgbench",
                     "state": "collapsed",
                     "item_type": "table",
@@ -294,8 +294,8 @@
                     "data": []
                 },
                 "custom_tables": {
-                    "header": "pgbench tables",
-                    "description": "Table schema for the pgbench load test",
+                    "header": "Workload initialization and configuration",
+                    "description": "Profile manifest, schema, generators, setup scripts and supporting files",
                     "state": "collapsed",
                     "item_type": "plain_text",
                     "python_command": "workload_tables",
@@ -312,12 +312,12 @@
             }
         },
         "result": {
-            "header": "Tests result info",
-            "description": "Results of tests",
+            "header": "Benchmark results",
+            "description": "Throughput, latency and pgbench output",
             "state": "expanded",
             "reports": {
                 "pgbench_outputs": {
-                    "header": "benchmark results info",
+                    "header": "Measurements",
                     "state": "collapsed",
                     "item_type": "table",
                     "python_command": "benchmark_result",
@@ -325,7 +325,7 @@
                     "data": []
                 },
                 "chart": {
-                    "header": "benchmark plots",
+                    "header": "Transactions per second",
                     "description": "",
                     "state": "collapsed",
                     "item_type": "chart",
@@ -335,6 +335,7 @@
                         "chart": {
                             "height": 350,
                             "type": "line",
+                            "unit": "transactions/s",
                             "zoom": {
                                 "enabled": false
                             }
@@ -347,7 +348,7 @@
                             "width": 2
                         },
                         "title": {
-                            "text": "tps(clients)",
+                            "text": "Transactions per second",
                             "align": "left"
                         },
                         "grid": {
@@ -361,8 +362,133 @@
                         },
                         "yaxis": {
                             "title": {
-                                "text": "Transactions per Second (tps)"
+                                "text": "Transactions per second"
                             }
+                        },
+                        "xaxis": {
+                            "title": {
+                                "text": "Clients"
+                            }
+                        }
+                    }
+                },
+                "chart_latency_average_ms": {
+                    "header": "Average transaction latency",
+                    "description": "Average transaction latency reported by pgbench.",
+                    "state": "collapsed",
+                    "item_type": "chart",
+                    "python_command": "chart_pgbench_metric",
+                    "metric_key": "latency_average_ms",
+                    "data": {
+                        "series": [],
+                        "chart": {
+                            "height": 350,
+                            "type": "line",
+                            "unit": "ms",
+                            "show_points": true
+                        },
+                        "title": {
+                            "text": "Average transaction latency"
+                        },
+                        "xaxis": {
+                            "title": {
+                                "text": "Clients"
+                            }
+                        }
+                    }
+                },
+                "chart_latency_stddev_ms": {
+                    "header": "Transaction latency stddev",
+                    "description": "Standard deviation of transaction latency; available when pgbench reports latency measurements, for example with --progress.",
+                    "state": "collapsed",
+                    "item_type": "chart",
+                    "python_command": "chart_pgbench_metric",
+                    "metric_key": "latency_stddev_ms",
+                    "data": {
+                        "series": [],
+                        "chart": {
+                            "height": 350,
+                            "type": "line",
+                            "unit": "ms",
+                            "show_points": true
+                        },
+                        "title": {
+                            "text": "Transaction latency stddev"
+                        },
+                        "xaxis": {
+                            "title": {
+                                "text": "Clients"
+                            }
+                        }
+                    }
+                },
+                "chart_failed_transactions_percent": {
+                    "header": "Failed transactions",
+                    "description": "Percentage of failed transactions due to serialization or deadlock errors, as reported by pgbench.",
+                    "state": "collapsed",
+                    "item_type": "chart",
+                    "python_command": "chart_pgbench_metric",
+                    "metric_key": "failed_transactions_percent",
+                    "data": {
+                        "series": [],
+                        "chart": {
+                            "height": 350,
+                            "type": "line",
+                            "unit": "%",
+                            "show_points": true
+                        },
+                        "title": {
+                            "text": "Failed transactions"
+                        },
+                        "xaxis": {
+                            "title": {
+                                "text": "Clients"
+                            }
+                        }
+                    }
+                },
+                "chart_retried_transactions_percent": {
+                    "header": "Retried transactions",
+                    "description": "Percentage of transactions with retries, as reported by pgbench when --max-tries is not 1.",
+                    "state": "collapsed",
+                    "item_type": "chart",
+                    "python_command": "chart_pgbench_metric",
+                    "metric_key": "retried_transactions_percent",
+                    "data": {
+                        "series": [],
+                        "chart": {
+                            "height": 350,
+                            "type": "line",
+                            "unit": "%",
+                            "show_points": true
+                        },
+                        "title": {
+                            "text": "Retried transactions"
+                        },
+                        "xaxis": {
+                            "title": {
+                                "text": "Clients"
+                            }
+                        }
+                    }
+                },
+                "chart_initial_connection_time_ms": {
+                    "header": "Initial connection time",
+                    "description": "Initial connection time reported by pgbench; unavailable with --connect, which reports a different connection metric.",
+                    "state": "collapsed",
+                    "item_type": "chart",
+                    "python_command": "chart_pgbench_metric",
+                    "metric_key": "initial_connection_time_ms",
+                    "data": {
+                        "series": [],
+                        "chart": {
+                            "height": 350,
+                            "type": "line",
+                            "unit": "ms",
+                            "show_points": true
+                        },
+                        "title": {
+                            "text": "Initial connection time"
                         },
                         "xaxis": {
                             "title": {

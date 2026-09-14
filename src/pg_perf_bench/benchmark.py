@@ -3,6 +3,7 @@ import os
 import platform
 import re
 import sys
+from contextlib import nullcontext
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from pg_perf_bench.client_tools import (
 from pg_perf_bench.connections import get_connection
 from pg_perf_bench.const import (
     BENCHMARK_TEMPLATE_JSON_PATH,
+    ConnectionType,
     WorkMode,
     get_datetime_report,
     get_default_report_name,
@@ -31,6 +33,13 @@ from pg_perf_bench.db_operations import (
 )
 from pg_perf_bench.errors import CollectionError
 from pg_perf_bench.log import display_user_configuration
+from pg_perf_bench.managed import (
+    MANAGED_NO_DATA,
+    add_managed_report_metadata,
+    mark_managed_unavailable,
+    read_managed_pg_info,
+)
+from pg_perf_bench.pgbench_metrics import LEGACY_METRIC_KEYS, parse_pgbench_metrics
 from pg_perf_bench.report.commands import fill_info_report
 from pg_perf_bench.report.processing import get_report_structure
 from pg_perf_bench.system_metrics import (
@@ -70,6 +79,22 @@ class BenchmarkRunner:
     @staticmethod
     def environment_evidence(report: dict[str, Any]) -> dict[str, Any]:
         """Build stable dimension hashes without volatile usage counters."""
+        managed_info = report.get('managed_pg_info')
+        if managed_info:
+            load_generator = (report.get('postgresql_compatibility') or {}).get('load_generator')
+            identity = {
+                'managed_pg_info_hash': managed_info['hash'],
+                'load_generator': load_generator,
+            }
+            return {
+                'schema_version': 'pg_perf_bench/environment-evidence-v1',
+                'identity_hash': canonical_hash(identity),
+                'dimensions': {
+                    'managed_instance': {'hash': managed_info['hash'], 'items': ['managed_pg_info']}
+                },
+                'load_generator_hash': canonical_hash(load_generator),
+                'system_metrics_collection_scope': 'unavailable_managed_postgresql',
+            }
         system_reports = report['sections']['system']['reports']
 
         def stable_value(item_name: str) -> Any:
@@ -124,56 +149,10 @@ class BenchmarkRunner:
         }
 
     @staticmethod
-    def get_pgbench_results(pgbench_output: str) -> list[int | float]:
-        """
-        Extracts key performance metrics from the pgbench output string.
-        Returns a list of metrics in the following order:
-        [clients, duration, transactions, latency_avg, init_conn_time, tps].
-        """
-
-        def get_val(iter_matches, val_type: str) -> int | float | None:
-            for match_obj in iter_matches:
-                sub_str = pgbench_output[match_obj.span()[0] : match_obj.span()[1]]
-                val_iter = re.finditer(r'\d+([.,]\d+)?', sub_str)
-                for vv in val_iter:
-                    numeric_str = sub_str[vv.span()[0] : vv.span()[1]]
-                    numeric_str = numeric_str.replace(',', '.')
-                    if val_type == 'float':
-                        return float(numeric_str)
-                    elif val_type == 'int':
-                        return int(numeric_str)
-            return None
-
-        clients = get_val(re.finditer(r'number\sof\sclients\:\s(\d+)', pgbench_output), 'int')
-        duration = get_val(re.finditer(r'duration\:\s(\d+)', pgbench_output), 'int')
-        transactions = get_val(
-            re.finditer(
-                r'number\sof\stransactions\sactually\sprocessed\:\s((\d+)/\d+|\d+)',
-                pgbench_output,
-            ),
-            'int',
-        )
-        latency_avg = get_val(
-            re.finditer(r'latency\saverage\s=\s\d+(?:[.,]\d+)?\sms', pgbench_output),
-            'float',
-        )
-        init_conn_time = get_val(
-            re.finditer(
-                r'initial\sconnection\stime\s=\s\d+(?:[.,]\d+)?\sms',
-                pgbench_output,
-            ),
-            'float',
-        )
-        tps = get_val(re.finditer(r'tps\s=\s\d+(?:[.,]\d+)?', pgbench_output), 'float')
-
-        return [
-            clients,
-            duration,
-            transactions,
-            latency_avg,
-            init_conn_time,
-            tps,
-        ]
+    def get_pgbench_results(pgbench_output: str) -> list[int | float | None]:
+        """Return the historical six-column metrics table."""
+        metrics = parse_pgbench_metrics(pgbench_output)
+        return [metrics[key] for key in LEGACY_METRIC_KEYS]
 
     @staticmethod
     def get_filled_load_commands(
@@ -244,6 +223,12 @@ class BenchmarkRunner:
             )
         try:
             db_tasks = DBTasks(db_conf, logger)
+            if workload_conf.get('managed_pg_info') or conn_type == ConnectionType.MANAGED:
+                await db_tasks.check_db_access()
+                await db_tasks.drop_db()
+                await db_tasks.init_db()
+                await db_tasks.check_user_db_access()
+                return
             conn_tasks = get_conn_type_tasks(conn_type)(
                 db_conf=workload_conf, conn=conn, logger=logger
             )
@@ -333,7 +318,7 @@ class BenchmarkRunner:
         )
         logger.info('Executing pgbench workload command.')
         sampler_task = None
-        if connection is not None:
+        if connection is not None and connection_type != ConnectionType.MANAGED:
             sampling_duration = infer_pgbench_duration(
                 workload_cmd,
                 system_metrics_duration,
@@ -363,23 +348,16 @@ class BenchmarkRunner:
             if sampler_task is not None:
                 await asyncio.gather(sampler_task, return_exceptions=True)
             raise
-        metrics = BenchmarkRunner.get_pgbench_results(workload_result.stdout)
-        if metrics[5] is None:
+        metrics = parse_pgbench_metrics(workload_result.stdout)
+        if metrics['tps'] is None:
             raise CollectionError(
                 'pgbench completed but TPS could not be parsed; raw output is preserved'
             )
         result = {
             'init': init_result.as_dict(secrets=secrets),
             'workload': workload_result.as_dict(secrets=secrets),
-            'metrics': {
-                'clients': metrics[0],
-                'duration_seconds': metrics[1],
-                'transactions': metrics[2],
-                'latency_average_ms': metrics[3],
-                'initial_connection_time_ms': metrics[4],
-                'tps': metrics[5],
-            },
-            'legacy_metrics': metrics,
+            'metrics': metrics,
+            'legacy_metrics': [metrics[key] for key in LEGACY_METRIC_KEYS],
         }
         if system_metrics is not None:
             result['system_metrics'] = system_metrics
@@ -453,10 +431,12 @@ class BenchmarkRunner:
         workload_conf: dict[str, Any],
     ) -> dict[str, Any]:
         """Return the safe, user-facing parameters that define a benchmark run."""
+        managed = bool(workload_conf.get('managed_pg_info'))
         return {
             'schema_version': 'pg_perf_bench/invocation-v1',
             'mode': 'benchmark',
             'connection_type': str(conn_type),
+            'managed_postgresql': managed,
             'database': {
                 'host': db_conf.get('host'),
                 'port': db_conf.get('port'),
@@ -471,9 +451,13 @@ class BenchmarkRunner:
                 'iteration_values': list(workload_conf.get('pgbench_iter_list') or []),
             },
             'metrics': {
-                'engine': 'pg_diag',
-                'interval_seconds': workload_conf.get('system_metrics_interval'),
-                'duration_override_seconds': workload_conf.get('system_metrics_duration'),
+                'engine': None if managed else 'pg_diag',
+                'interval_seconds': None
+                if managed
+                else workload_conf.get('system_metrics_interval'),
+                'duration_override_seconds': (
+                    None if managed else workload_conf.get('system_metrics_duration')
+                ),
             },
             'safety': {
                 'database_recreated_before_each_iteration': True,
@@ -567,7 +551,7 @@ class BenchmarkRunner:
         try:
             await fill_info_report(logger, client, db_conn, report_data, report)
             logger.info('Monitoring data collected.')
-            if log_conf.get('collect_pg_logs'):
+            if log_conf.get('collect_pg_logs') and not report.get('managed_pg_info'):
                 await collect_db_logs(
                     logger,
                     client,
@@ -597,6 +581,9 @@ class BenchmarkRunner:
 
         try:
             report = BenchmarkRunner.setup_report_structure(report_conf, logger)
+            managed_path = workload_conf.get('managed_pg_info')
+            if managed_path:
+                add_managed_report_metadata(report, read_managed_pg_info(managed_path))
             report['invocation'] = BenchmarkRunner.build_invocation_summary(
                 conn_type,
                 db_conf,
@@ -607,7 +594,11 @@ class BenchmarkRunner:
                 logger.error('No valid load iterations configured.')
                 return None
 
-            connection = BenchmarkRunner.setup_connection(conn_type, conn_conf, logger)
+            connection = (
+                nullcontext(None)
+                if managed_path
+                else BenchmarkRunner.setup_connection(conn_type, conn_conf, logger)
+            )
             if not connection:
                 return None
 
@@ -615,23 +606,30 @@ class BenchmarkRunner:
                 'args': args,
                 'workload_conf': workload_conf,
                 'report_conf': report_conf,
+                'managed_postgresql': bool(managed_path),
             }
             workload_evidence = build_workload_evidence(workload_conf, load_iterations)
             report_data['workload_evidence'] = workload_evidence
             report['workload_evidence'] = workload_evidence
             report['benchmark_methodology'] = {
                 'database_recreated_before_each_iteration': True,
+                'server_restarted_before_each_iteration': not bool(managed_path),
+                'managed_postgresql': bool(managed_path),
                 'os_caches_dropped_before_each_iteration': bool(
                     workload_conf.get('drop_os_caches')
                 ),
                 'workload_definition_hash': workload_evidence['definition_hash'],
                 'workload_execution_hash': workload_evidence['execution_hash'],
-                'system_metrics_engine': 'pg_diag',
-                'system_metrics_collected_during_workload': True,
-                'system_metrics_interval_seconds': float(
-                    workload_conf.get('system_metrics_interval', 1.0)
+                'system_metrics_engine': None if managed_path else 'pg_diag',
+                'system_metrics_collected_during_workload': not bool(managed_path),
+                'system_metrics_interval_seconds': (
+                    None
+                    if managed_path
+                    else float(workload_conf.get('system_metrics_interval', 1.0))
                 ),
-                'system_metrics_duration_override': workload_conf.get('system_metrics_duration'),
+                'system_metrics_duration_override': (
+                    None if managed_path else workload_conf.get('system_metrics_duration')
+                ),
             }
 
             async with connection as client:
@@ -640,7 +638,7 @@ class BenchmarkRunner:
                     workload_conf,
                 )
                 report['postgresql_compatibility'] = compatibility
-                if workload_conf.get('pg_custom_config'):
+                if workload_conf.get('pg_custom_config') and not managed_path:
                     custom_path = workload_conf['pg_custom_config']
                     db_path = workload_conf.get('pg_data_path', '')
                     logger.info(f'Sending custom PostgreSQL config: {custom_path}')
@@ -660,6 +658,15 @@ class BenchmarkRunner:
                 report['benchmark_runs'] = benchmark_runs
                 report['maximum_tps'] = BenchmarkRunner.maximum_tps(benchmark_runs)
                 report['sections']['os_metrics'] = build_system_metrics_section(benchmark_runs)
+                if managed_path:
+                    section = report['sections']['os_metrics']
+                    section['description'] = MANAGED_NO_DATA
+                    for item in section['reports'].values():
+                        item['header'] = (
+                            item['header'].removeprefix('os.').replace('_', ' ').title()
+                        )
+                        item['description'] = ''
+                        mark_managed_unavailable(item)
 
                 await BenchmarkRunner.collect_monitoring_metrics(
                     logger, db_conf, report_data, report, log_conf, client
