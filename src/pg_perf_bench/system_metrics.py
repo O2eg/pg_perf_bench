@@ -201,7 +201,17 @@ def build_system_metrics_section(benchmark_runs: list[dict[str, Any]]) -> dict[s
                 'and metric engine.'
             ),
             'state': (
-                'expanded' if metric_id in {'os.cpu_utilization', 'os.cpu_load'} else 'collapsed'
+                'expanded'
+                if metric_id
+                in {
+                    'os.cpu_utilization',
+                    'os.cpu_load',
+                    'os.memory_usage',
+                    'os.disk_iops',
+                    'os.disk_utilization',
+                    'os.disk_latency',
+                }
+                else 'collapsed'
             ),
             'item_type': 'chart_group',
             'data': blocks,

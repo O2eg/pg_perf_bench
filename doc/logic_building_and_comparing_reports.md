@@ -103,6 +103,11 @@ Join requires at least two source reports with:
 - complete chart and pgbench-result structures;
 - every required join-task path present and equal.
 
+The Storage section preserves each iteration's Before workload and After workload
+items from every source, including database sizes and top tables/indexes. Sources
+without storage snapshots remain joinable and receive an explicit missing-evidence
+item. Required storage paths in a JOIN task must still exist and match.
+
 The Replication section is optional for older `report-v1` sources. A mixed join
 preserves each source's replication snapshot separately and labels sources that
 did not collect it. Missing replication evidence is not an empty slot list or a

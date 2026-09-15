@@ -1,5 +1,7 @@
 import platform
 import sys
+import time
+from datetime import datetime, timezone
 
 import asyncpg
 
@@ -113,6 +115,8 @@ class InfoCollector:
         Orchestrates full process of collecting system and DB info,
         generating and returning a report dictionary.
         """
+        started_at = datetime.now(timezone.utc).isoformat()
+        started_clock = time.monotonic()
         if 'report_template' not in report_conf:
             logger.error('Missing "report_template" in report_conf.')
             return None
@@ -165,6 +169,11 @@ class InfoCollector:
                     logger.info('Database connection closed.')
 
             logger.info('Collect info process completed successfully.')
+            report['timing'] = {
+                'started_at': started_at,
+                'finished_at': datetime.now(timezone.utc).isoformat(),
+                'elapsed_seconds': time.monotonic() - started_clock,
+            }
             return report
 
         except FileNotFoundError as fe:

@@ -240,7 +240,7 @@ PGPASSWORD=secret pg-perf-bench benchmark \
   --report-name local-pg18
 ```
 
-The command timeout applies independently to initialization and workload
+The command timeout applies independently to initialization, `VACUUM ANALYZE`, and workload
 commands. It must be longer than the expected command duration.
 
 ### Workload placeholders
@@ -288,7 +288,7 @@ several SQL statements or transactions. The default HTAP reporting share is
 | Data volume | `--workload-scale SCALE`, default `1`; positive fractional values such as `0.25` are accepted. Generators retain minimum table sizes at small scales. |
 | Concurrent clients | `--pgbench-clients 1,2,4,8,16`; each value gets a freshly recreated database. Bundled commands also use one pgbench job per client. |
 | Measured window per point | `--workload-duration-seconds 120`; overrides the profile default for every client count. |
-| Command time limit | `--command-timeout 300`; allow enough time for initialization and for the workload window plus completion of in-flight queries. |
+| Command time limit | `--command-timeout 300`; allow enough time for initialization, pre-workload `VACUUM ANALYZE`, and the workload window plus completion of in-flight queries. |
 
 Bundled profiles require `--pgbench-clients`; `--pgbench-time` is rejected.
 They select benchmark type `custom` automatically. `--workload-path` cannot be
@@ -496,9 +496,11 @@ For each axis value in the regular mode without Patroni, the backend:
 4. flushes filesystems and optionally drops host OS caches;
 5. starts PostgreSQL and recreates the database;
 6. runs the initialization command;
-7. runs the workload command while the `pg_diag` Linux sampler records CPU,
+7. runs `VACUUM ANALYZE` and captures the Before workload size snapshot;
+8. runs the workload command while the `pg_diag` Linux sampler records CPU,
    RAM, disk and network metrics on the database host;
-8. stores raw stdout, stderr, return code, UTC start time, elapsed time, parsed
+9. waits for any remaining OS sampling to finish, then captures the After workload size snapshot;
+10. stores both snapshots, raw stdout, stderr, return code, UTC start time, elapsed time, parsed
    pgbench metrics, and iteration metadata.
 
 After the final iteration it collects the configured host and PostgreSQL facts
@@ -645,6 +647,21 @@ required on the SSH server.
 
 ## Report contents
 
+Below `parameters`, the report header shows `Started:`, `Finished:`, and
+`Common duration:` on separate lines. New reports record UTC timestamps and a
+total elapsed duration in `timing`. For benchmarks, this covers preparation,
+every workload iteration, and final data/log collection, up to report
+serialization. Collection and JOIN reports measure their own operations.
+Duration is measured with a monotonic clock and displayed as `HH:MM:SS.mmm`.
+Older reports retain their recorded start time; missing finish times and total
+durations display `Not recorded`.
+
+The main measurements, TPS, average latency and failed-transaction charts,
+database version/settings, replication policy/settings/slots/senders, storage
+snapshots, pgbench options, CPU/RAM capacity, disk space, and key CPU/memory/disk
+timelines are expanded by default. Detailed source code and secondary items
+remain collapsible; `Expand all` and `Collapse all` still control the full report.
+
 A benchmark report contains:
 
 - artifact schema and generator versions;
@@ -658,6 +675,8 @@ A benchmark report contains:
 - a compatibility preflight containing the PostgreSQL server major, the newest
   local pgbench/psql versions and the supported server range 10–18;
 - raw initialization and workload evidence for every completed iteration;
+- all database sizes and the workload database's top 100 tables/indexes, captured
+  before and after every measured workload;
 - parsed clients, duration, transaction count, average latency, latency standard
   deviation, failed/retried transaction percentages, initial connection time, and TPS;
 - an explicit `maximum_tps` point with its axis value and complete metrics;
@@ -694,6 +713,49 @@ pg-perf-bench render \
   --from-json report/local-pg18.json \
   --out report/local-pg18.html
 ```
+
+### Storage sizes before and after workload
+
+Benchmark reports include **Storage sizes before and after workload**, with six
+items for **every iteration**:
+
+| Snapshot | Items |
+| --- | --- |
+| Before workload | All database sizes; top 100 tables by total size; top 100 indexes by size |
+| After workload | All database sizes; top 100 tables by total size; top 100 indexes by size |
+
+The order is: recreate the workload database → run `init_command` → run
+`VACUUM ANALYZE` → collect **Before workload** → run `pgbench` → finish any
+remaining OS sampling → collect **After workload**. Preparation and size collection
+are outside the measured pgbench command. Waiting for the OS sampler prevents
+size-query CPU and I/O from entering its final samples. An explicit
+`--system-metrics-duration` longer than the workload delays the after snapshot
+until sampling finishes. No additional vacuum is run before the after snapshot.
+`VACUUM ANALYZE` uses `--command-timeout`; a failure stops the benchmark before
+the workload starts.
+
+The database item lists **every database on the instance**, including templates,
+with `is_workload_database` marking the target. Sizes cover database files across
+tablespaces; WAL and shared cluster files are excluded. An inaccessible database
+remains listed with a null size and its collection error. Other databases' sizes
+are retained.
+
+Table and index items cover the **workload database**. They use measured sizes,
+not catalog page estimates, and sort before applying the 100-row limit. Tables
+are ranked by total size including indexes and TOAST; the table, index and TOAST
+sizes are also shown separately. TOAST is already included in the table size.
+Stored leaf partitions and materialized views are included; partitioned parents
+without storage and system objects are omitted. Index sizes include all forks;
+TOAST indexes are accounted for in the table item. Sizes are integer bytes with
+human-readable totals.
+
+Every snapshot records its collection interval in JSON and HTML. Measurements
+are sequential, so concurrent activity can change sizes during collection.
+SQL statements have a 10-second timeout; errors remain explicit in the report.
+Snapshots are retained in `benchmark_runs[].storage` before the next iteration
+recreates the database. JOIN preserves all source snapshots and identifies older
+reports that did not collect them. PostgreSQL 10–18 and managed PostgreSQL use
+the same SQL collection path.
 
 ### Replication evidence
 

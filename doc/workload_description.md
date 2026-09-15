@@ -18,6 +18,14 @@ axis value is used.
 Every axis value is a separate destructive iteration with a freshly recreated
 database.
 
+After `init_command`, the runner executes `VACUUM ANALYZE` and collects the
+**Before workload** size snapshot. It then runs the measured command, waits for
+any remaining OS sampling to finish, and collects **After workload**, without
+another vacuum. This keeps size-query CPU and I/O out of the OS samples. Each snapshot
+lists all databases on the instance and the workload database's top 100 tables
+and indexes by measured size. Snapshots are retained separately for every axis
+value. See [storage report contents](../README.md#storage-sizes-before-and-after-workload).
+
 Bundled profiles intentionally use `--pgbench-clients`: they sweep concurrency
 to find maximum TPS for one fixed dataset, query mix and environment.
 
@@ -96,6 +104,7 @@ recreates the database for each concurrency point and measures maximum TPS.
 `--command-timeout` is a positive number of seconds applied independently to:
 
 - every initialization command;
+- the pre-workload `VACUUM ANALYZE`;
 - every measured workload command;
 - transport host commands unless an item defines a smaller timeout.
 

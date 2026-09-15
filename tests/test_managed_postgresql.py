@@ -145,6 +145,7 @@ def test_managed_run_only_uses_database_and_workload_clients(tmp_path):
         setattr(tasks, method, AsyncMock())
     db = MagicMock()
     db.close = AsyncMock()
+    db.execute = AsyncMock()
     db.fetchval = AsyncMock(return_value='PostgreSQL 18.4')
     db.fetch = AsyncMock(return_value=[])
     pgbench_output = (
@@ -205,6 +206,8 @@ def test_managed_run_only_uses_database_and_workload_clients(tmp_path):
         assert getattr(tasks, method).await_count == 2
     assert db.fetchval.await_count > 0 and db.fetch.await_count > 0
     assert len(report['benchmark_runs']) == 2
+    assert db.execute.await_count == 2
+    assert len(report['sections']['storage']['reports']) == 12
     assert all('system_metrics' not in run for run in report['benchmark_runs'])
     assert report['invocation']['connection_type'] == 'managed'
     assert report['invocation']['managed_postgresql'] is True

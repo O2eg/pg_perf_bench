@@ -2,6 +2,8 @@ import copy
 import difflib
 import json
 import os
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from pg_perf_bench.const import get_datetime_report, get_default_report_name
@@ -162,9 +164,8 @@ class ReportJoiner:
         """
         ref_steps, _ = parse_json_in_order(ref_rep)
         cmp_steps, _ = parse_json_in_order(cmp_rep)
-        # Result charts and replication snapshots are merged separately.
-        # Older report-v1 artifacts did not collect the replication section.
-        separate_sections = {'result', 'replication'}
+        # Result charts and optional snapshots are merged separately.
+        separate_sections = {'result', 'replication', 'storage'}
         ref_steps = [step for step in ref_steps if step['section'] not in separate_sections]
         cmp_steps = [step for step in cmp_steps if step['section'] not in separate_sections]
         if len(ref_steps) != len(cmp_steps):
@@ -430,6 +431,8 @@ class ReportJoiner:
         if not isinstance(ref, dict):
             logger.error('Invalid reference report')
             return None
+        # A source benchmark's timing is not the duration of this JOIN operation.
+        ref.pop('timing', None)
         source_labels = [
             str(report.get('report_name') or name)
             for name, report in zip(names, reports, strict=True)
@@ -495,31 +498,44 @@ class ReportJoiner:
                 logger.error(str(exc))
                 return None
 
-        replication_sources = [report.get('sections', {}).get('replication') for report in reports]
-        if any(section is not None for section in replication_sources):
-            replication = {
-                'header': 'Replication',
-                'description': 'Replication snapshots from each source report. '
+        for section_name, title, description in (
+            (
+                'replication',
+                'Replication',
+                'Replication snapshots from each source report. '
                 'Missing evidence does not mean that replication was disabled.',
+            ),
+            (
+                'storage',
+                'Storage sizes before and after workload',
+                'Storage snapshots from every iteration of each source report. '
+                'Missing evidence does not mean that the databases were empty.',
+            ),
+        ):
+            sources = [report.get('sections', {}).get(section_name) for report in reports]
+            if not any(section is not None for section in sources):
+                continue
+            snapshots = {
+                'header': title,
+                'description': description,
                 'state': 'expanded',
                 'reports': {},
             }
-            for index, (label, section) in enumerate(
-                zip(source_labels, replication_sources, strict=True)
-            ):
+            for index, (label, section) in enumerate(zip(source_labels, sources, strict=True)):
                 if section is None:
-                    replication['reports'][f'source_{index}_unavailable'] = {
+                    snapshots['reports'][f'source_{index}_unavailable'] = {
                         'header': label,
                         'item_type': 'plain_text',
-                        'data': 'Replication evidence was not collected in this source report.',
+                        'data': f'{section_name.capitalize()} evidence was not collected '
+                        'in this source report.',
                         'collection_status': 'unsupported',
                     }
                     continue
                 for name, source_item in section['reports'].items():
                     item = copy.deepcopy(source_item)
                     item['header'] = f'{label} | {item.get("header", name)}'
-                    replication['reports'][f'source_{index}_{name}'] = item
-            ref['sections']['replication'] = replication
+                    snapshots['reports'][f'source_{index}_{name}'] = item
+            ref['sections'][section_name] = snapshots
 
         evidence = [
             {
@@ -562,6 +578,8 @@ class ReportJoiner:
           5. Sets the final report name and description.
         Returns the joined report or None in case of failure.
         """
+        started_at = datetime.now(timezone.utc).isoformat()
+        started_clock = time.monotonic()
         if raw_args and isinstance(raw_args, dict):
             display_user_configuration(raw_args, logger)
 
@@ -638,4 +656,9 @@ class ReportJoiner:
 
         joined['description'] = f'\nComparison Reports:\n{all_names}\n\nJoined by:\n{tasks_content}'
         logger.info('Join reports process completed successfully.')
+        joined['timing'] = {
+            'started_at': started_at,
+            'finished_at': datetime.now(timezone.utc).isoformat(),
+            'elapsed_seconds': time.monotonic() - started_clock,
+        }
         return joined

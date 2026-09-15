@@ -376,6 +376,9 @@ def _check_report(text, *secrets):
     report = json.loads(text)
     assert len(report['benchmark_runs']) == 2
     assert all(run['metrics']['tps'] > 0 for run in report['benchmark_runs'])
+    storage_items = report['sections']['storage']['reports']
+    assert len(storage_items) == 12
+    assert all(item['collection_status'] == 'ok' for item in storage_items.values())
     assert all(secret not in text for secret in secrets)
     assert report['benchmark_methodology']['server_restarted_before_each_iteration'] is True
 

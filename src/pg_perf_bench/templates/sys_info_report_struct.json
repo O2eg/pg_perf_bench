@@ -33,21 +33,21 @@
                 "total_ram": {
                     "header": "Total RAM capacity | /proc/meminfo",
                     "description": "Total database host RAM ",
-                    "state": "collapsed",
+                    "state": "expanded",
                     "item_type": "plain_text",
                     "shell_command_file": "total_ram.sh",
                     "data": ""
                 },
                 "cpu_info": {
                     "header": "CPU architecture and specification display tool | lscpu",
-                    "state": "collapsed",
+                    "state": "expanded",
                     "item_type": "plain_text",
                     "shell_command_file": "cpu_info.sh",
                     "data": ""
                 },
                 "df_h": {
                     "header": "Disk space usage | df -h",
-                    "state": "collapsed",
+                    "state": "expanded",
                     "item_type": "plain_text",
                     "shell_command_file": "df_h.sh",
                     "data": ""

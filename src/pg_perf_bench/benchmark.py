@@ -3,8 +3,10 @@ import os
 import platform
 import re
 import sys
+import time
 from contextlib import nullcontext
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +45,11 @@ from pg_perf_bench.managed import (
 from pg_perf_bench.pgbench_metrics import LEGACY_METRIC_KEYS, parse_pgbench_metrics
 from pg_perf_bench.report.commands import fill_info_report
 from pg_perf_bench.report.processing import get_report_structure
+from pg_perf_bench.storage import (
+    build_storage_section,
+    collect_storage_snapshot,
+    vacuum_analyze,
+)
 from pg_perf_bench.system_metrics import (
     build_system_metrics_section,
     collect_system_metrics,
@@ -328,6 +335,9 @@ class BenchmarkRunner:
             env=environment,
             secrets=secrets,
         )
+        await vacuum_analyze(logger, db_conf, command_timeout)
+        logger.info('Collecting storage sizes before workload.')
+        storage_before = await collect_storage_snapshot(logger, db_conf)
         logger.info('Executing pgbench workload command.')
         sampler_task = None
         if connection is not None and connection_type != ConnectionType.MANAGED:
@@ -353,7 +363,11 @@ class BenchmarkRunner:
                 env=environment,
                 secrets=secrets,
             )
+            # Providers can finish after pgbench. Keep size-query CPU and I/O
+            # outside their final sampling interval.
             system_metrics = await sampler_task if sampler_task is not None else None
+            logger.info('Collecting storage sizes after workload.')
+            storage_after = await collect_storage_snapshot(logger, db_conf)
         except BaseException:
             if sampler_task is not None and not sampler_task.done():
                 sampler_task.cancel()
@@ -370,6 +384,7 @@ class BenchmarkRunner:
             'workload': workload_result.as_dict(secrets=secrets),
             'metrics': metrics,
             'legacy_metrics': [metrics[key] for key in LEGACY_METRIC_KEYS],
+            'storage': {'before_workload': storage_before, 'after_workload': storage_after},
         }
         if system_metrics is not None:
             result['system_metrics'] = system_metrics
@@ -589,6 +604,8 @@ class BenchmarkRunner:
         """
         Main entry point to execute the full benchmarking workflow.
         """
+        started_at = datetime.now(timezone.utc).isoformat()
+        started_clock = time.monotonic()
         display_user_configuration(args, logger)
 
         try:
@@ -632,6 +649,8 @@ class BenchmarkRunner:
                 ),
                 'workload_definition_hash': workload_evidence['definition_hash'],
                 'workload_execution_hash': workload_evidence['execution_hash'],
+                'vacuum_analyze_before_each_workload': True,
+                'storage_snapshots': ['before_workload', 'after_workload'],
                 'system_metrics_engine': None if managed_path else 'pg_diag',
                 'system_metrics_collected_during_workload': not bool(managed_path),
                 'system_metrics_interval_seconds': (
@@ -672,6 +691,7 @@ class BenchmarkRunner:
                 report_data['pgbench_outputs'] = [run['legacy_metrics'] for run in benchmark_runs]
                 report['benchmark_runs'] = benchmark_runs
                 report['maximum_tps'] = BenchmarkRunner.maximum_tps(benchmark_runs)
+                report['sections']['storage'] = build_storage_section(benchmark_runs)
                 report['sections']['os_metrics'] = build_system_metrics_section(benchmark_runs)
                 if managed_path:
                     section = report['sections']['os_metrics']
@@ -702,6 +722,11 @@ class BenchmarkRunner:
                 report['database_configuration_evidence'] = database_evidence
 
             logger.info('Benchmarking process completed successfully.')
+            report['timing'] = {
+                'started_at': started_at,
+                'finished_at': datetime.now(timezone.utc).isoformat(),
+                'elapsed_seconds': time.monotonic() - started_clock,
+            }
             return report
 
         except Exception as e:

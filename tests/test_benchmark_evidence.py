@@ -37,9 +37,10 @@ tps = 80.75 (without initial connection time)
     )
 
     async def scenario():
-        with patch(
-            'pg_perf_bench.benchmark.run_command_result',
-            command_results,
+        with (
+            patch('pg_perf_bench.benchmark.run_command_result', command_results),
+            patch('pg_perf_bench.benchmark.vacuum_analyze', AsyncMock()),
+            patch('pg_perf_bench.benchmark.collect_storage_snapshot', AsyncMock(return_value={})),
         ):
             return await BenchmarkRunner.run_benchmark_with_evidence(
                 MagicMock(),

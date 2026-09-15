@@ -902,6 +902,9 @@
       </div>
       <div id="reportDescription" class="runtime"></div>
       <div id="reportInvocation" class="runtime"></div>
+      <div id="reportStarted" class="runtime"></div>
+      <div id="reportFinished" class="runtime"></div>
+      <div id="reportDuration" class="runtime"></div>
       <label class="theme-toggle header-theme-toggle" title="Switch report theme">
         <span>Dark</span>
         <input id="themeToggle" type="checkbox">
@@ -2074,9 +2077,24 @@
       document.getElementById('generatorInfo').textContent = generator.name
         ? `${asText(generator.name)} version ${asText(generator.version)}`
         : '';
-      document.getElementById('reportDescription').textContent = report.description
-        ? `started=${asText(report.description)}`
-        : '';
+      const timing = report.timing && typeof report.timing === 'object' ? report.timing : {};
+      const legacyStarted = /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/.test(report.description || '')
+        ? report.description : null;
+      document.getElementById('reportDescription').textContent = legacyStarted
+        ? '' : asText(report.description || '');
+      const formatTimestamp = value => value
+        ? asText(value).replace('T', ' ').replace(/(\+00:00|Z)$/, ' UTC') : 'Not recorded';
+      const formatDuration = seconds => {
+        if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return 'Not recorded';
+        const milliseconds = Math.round(seconds * 1000);
+        const hours = Math.floor(milliseconds / 3600000);
+        const minutes = Math.floor(milliseconds / 60000) % 60;
+        const remainder = Math.floor(milliseconds / 1000) % 60;
+        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}.${String(milliseconds % 1000).padStart(3, '0')}`;
+      };
+      document.getElementById('reportStarted').textContent = `Started: ${formatTimestamp(timing.started_at || legacyStarted)}`;
+      document.getElementById('reportFinished').textContent = `Finished: ${formatTimestamp(timing.finished_at)}`;
+      document.getElementById('reportDuration').textContent = `Common duration: ${formatDuration(timing.elapsed_seconds)}`;
       const invocation = report.invocation && typeof report.invocation === 'object'
         ? report.invocation
         : {};

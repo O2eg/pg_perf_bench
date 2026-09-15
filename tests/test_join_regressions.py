@@ -141,6 +141,53 @@ def test_join_old_report_still_rejects_required_replication_evidence():
         )
 
 
+@pytest.mark.parametrize('old_first', [True, False])
+def test_join_retains_each_storage_snapshot_and_marks_old_sources(old_first, tmp_path):
+    from pg_perf_bench.report.processing import save_report
+
+    old = _report('old', 'A', 10)
+    new = _report('new', 'A', 20)
+    new['sections']['storage'] = {
+        'header': 'Storage sizes before and after workload',
+        'reports': {
+            f'iteration_{iteration}_{phase}_database_sizes': {
+                'header': f'Iteration {iteration} | {phase} | Database sizes',
+                'item_type': 'table',
+                'theader': ['database_name', 'database_size_bytes'],
+                'data': [['bench', iteration * size]],
+                'collection_status': 'ok',
+            }
+            for iteration in (1, 2)
+            for phase, size in (('Before workload', 8192), ('After workload', 16384))
+        },
+    }
+    reports = [old, new] if old_first else [new, old]
+    original = deepcopy(reports)
+    joined = ReportJoiner.merge_reports(
+        MagicMock(),
+        [r['report_name'] + '.json' for r in reports],
+        reports,
+        [],
+        raise_on_error=True,
+    )
+    items = list(joined['sections']['storage']['reports'].values())
+    assert len(items) == 5
+    assert reports == original
+    assert [item['data'] for item in items if item['header'].startswith('new | ')] == [
+        [['bench', 8192]],
+        [['bench', 16384]],
+        [['bench', 16384]],
+        [['bench', 32768]],
+    ]
+    missing = next(item for item in items if item['header'] == 'old')
+    assert missing['collection_status'] == 'unsupported'
+    save_report(MagicMock(), joined, tmp_path)
+    assert (
+        'Storage evidence was not collected'
+        in (tmp_path / (joined['report_name'] + '.html')).read_text()
+    )
+
+
 def test_join_still_rejects_missing_non_replication_items():
     complete = _report('complete', 'A', 10)
     incomplete = _report('incomplete', 'A', 20)

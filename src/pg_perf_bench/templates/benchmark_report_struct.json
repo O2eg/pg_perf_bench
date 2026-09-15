@@ -33,21 +33,21 @@
                 "total_ram": {
                     "header": "Total RAM capacity | /proc/meminfo",
                     "description": "Total database host RAM ",
-                    "state": "collapsed",
+                    "state": "expanded",
                     "item_type": "plain_text",
                     "shell_command_file": "total_ram.sh",
                     "data": ""
                 },
                 "cpu_info": {
                     "header": "CPU architecture and specification display tool | lscpu",
-                    "state": "collapsed",
+                    "state": "expanded",
                     "item_type": "plain_text",
                     "shell_command_file": "cpu_info.sh",
                     "data": ""
                 },
                 "df_h": {
                     "header": "Disk space usage | df -h",
-                    "state": "collapsed",
+                    "state": "expanded",
                     "item_type": "plain_text",
                     "shell_command_file": "df_h.sh",
                     "data": ""
@@ -224,7 +224,7 @@
                 "full_version": {
                     "header": "PostgreSQL full version",
                     "description": "Information about the installed PostgreSQL version, including the version number, system architecture, utilized compiler, and operating system",
-                    "state": "collapsed",
+                    "state": "expanded",
                     "item_type": "plain_text",
                     "sql_command_file": "full_version.sql",
                     "data": ""
@@ -246,7 +246,7 @@
                 "pg_settings": {
                     "header": "PostgreSQL settings",
                     "description": "Configuration settings of the PostgreSQL server",
-                    "state": "collapsed",
+                    "state": "expanded",
                     "item_type": "table",
                     "sql_command_file": "pg_settings.sql",
                     "theader": [],
@@ -287,7 +287,7 @@
                 "replication_settings": {
                     "header": "Replication and WAL settings",
                     "description": "Effective replication settings in the collector session, units, source and pending restart state. Only settings available on this PostgreSQL version are listed. Connection strings and passwords are excluded.",
-                    "state": "collapsed",
+                    "state": "expanded",
                     "item_type": "table",
                     "sql_command_file": "replication_settings.sql",
                     "theader": [],
@@ -296,7 +296,7 @@
                 "replication_commit_overrides": {
                     "header": "Permanent synchronous_commit overrides",
                     "description": "ALTER ROLE / ALTER DATABASE defaults across the cluster, with applicability to the collector role and database. Role-in-database overrides take precedence over role defaults, which take precedence over database defaults. Session and transaction overrides are not captured.",
-                    "state": "collapsed",
+                    "state": "expanded",
                     "item_type": "table",
                     "sql_command_file": "replication_commit_overrides.sql",
                     "theader": [],
@@ -362,7 +362,7 @@
                 "options": {
                     "header": "pgbench options",
                     "description": "Benchmark load configuration parameters for pgbench",
-                    "state": "collapsed",
+                    "state": "expanded",
                     "item_type": "table",
                     "python_command": "pgbench_options_table",
                     "theader": [],
@@ -393,7 +393,7 @@
             "reports": {
                 "pgbench_outputs": {
                     "header": "Measurements",
-                    "state": "collapsed",
+                    "state": "expanded",
                     "item_type": "table",
                     "python_command": "benchmark_result",
                     "theader": [],
@@ -402,7 +402,7 @@
                 "chart": {
                     "header": "Transactions per second",
                     "description": "",
-                    "state": "collapsed",
+                    "state": "expanded",
                     "item_type": "chart",
                     "python_command": "chart_tps",
                     "data": {
@@ -450,7 +450,7 @@
                 "chart_latency_average_ms": {
                     "header": "Average transaction latency",
                     "description": "Average transaction latency reported by pgbench.",
-                    "state": "collapsed",
+                    "state": "expanded",
                     "item_type": "chart",
                     "python_command": "chart_pgbench_metric",
                     "metric_key": "latency_average_ms",
@@ -500,7 +500,7 @@
                 "chart_failed_transactions_percent": {
                     "header": "Failed transactions",
                     "description": "Percentage of failed transactions due to serialization or deadlock errors, as reported by pgbench.",
-                    "state": "collapsed",
+                    "state": "expanded",
                     "item_type": "chart",
                     "python_command": "chart_pgbench_metric",
                     "metric_key": "failed_transactions_percent",
