@@ -91,7 +91,7 @@ def test_bundled_override_embeds_external_sql_and_hashes_it(
     assert external[0]['path'] == str(script)
     assert external[0]['role'] == 'query'
     assert external[0]['content'] == script.read_text()
-    assert len(files) == 9  # the eight bundled files are preserved too
+    assert len(files) == 13  # the twelve bundled files are preserved too
 
     script.write_text('SELECT 271828;\n', encoding='utf-8')
     second = build_workload_evidence(workload, commands)

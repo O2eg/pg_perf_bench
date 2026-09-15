@@ -240,10 +240,15 @@ PGPASSWORD=secret pg-perf-bench benchmark \
   --report-name local-pg18
 ```
 
-The command timeout applies independently to initialization, `VACUUM ANALYZE`, and workload
-commands. It must be longer than the expected command duration.
+The command timeout applies independently to legacy initialization, `VACUUM ANALYZE`, and
+workload commands. For the common loader it bounds each SQL job and replica wait, rather
+than the entire series of data batches. Allow enough time for the largest index build or
+table conversion. See [common initialization](INITIALIZATION.md).
 
 ### Workload placeholders
+
+`ARG_PYTHON_PATH` resolves to the Python interpreter running `pg_perf_bench`, so
+profile generators use the same installed dependencies even in legacy mode.
 
 | Placeholder | Value source |
 |---|---|
@@ -335,12 +340,34 @@ scripts; it does not guarantee identical observed mix proportions or TPS.
 These profiles use `profile.json`, independently of `pg_workload`'s
 scheduler-specific `profile.yml`.
 
+### Fast initialization
+
+Bundled profiles default to the [common initializer](INITIALIZATION.md): four workers,
+100,000 rows per data batch, UNLOGGED tables, temporary primary `fsync=off` and
+`synchronous_commit=off` in every loader connection. After loading it restores LOGGED
+tables, builds indexes in parallel, validates constraints and runs VACUUM ANALYZE.
+It then restores fsync, checkpoints, synchronizes host files and waits for directly
+connected replicas to replay initialization WAL before pgbench starts.
+
+`--init-workers` and `--init-batch-rows` control concurrency and batch size.
+`--init-fsync keep --init-table-mode logged` preserves normal durability during loading.
+The default fsync change affects the entire selected primary and requires superuser and
+host access; managed PostgreSQL requires `--init-fsync keep`. Patroni's DCS and synchronous
+replication configuration remain unchanged. Detailed phase timings and settings appear
+in the report.
+
+Use `--init-mode legacy` for the existing command-based initializer. An explicit
+`--init-command` also selects that path. Custom profiles can implement the same
+[LoadPlan interface](INITIALIZATION.md#profile-interface); no profile-specific acceleration
+is built into the runner.
+
 ### Changing script weights or pgbench options
 
 Keep `--workload-profile` and supply `--workload-command` to replace only its
 measured command. The packaged initialization still runs, and
 `ARG_WORKLOAD_PATH` still points to the packaged profile directory.
-`--init-command` can similarly replace the initialization command.
+`--init-command` replaces initialization and selects legacy mode, so its own loading
+and durability behavior applies.
 
 For example, append this option to the HTAP command above to change the
 reporting weight from 5 to 25, making its target share `25 / 125 = 20 %`:
@@ -376,13 +403,12 @@ Edit `generator.py` to change data distributions. Adjust the probabilities in
 Edit the SQL scripts for query behavior. The copied `profile.json` contains
 the command templates, including the script list and weights.
 
-Use `--benchmark-type custom --workload-path` for the copy. A custom path does
-not automatically apply commands or defaults from `profile.json`: pass both command templates explicitly,
-and set the duration explicitly if they use `ARG_WORKLOAD_DURATION_SECONDS`.
-The following reads your edited templates and runs them:
+Use `--benchmark-type custom --workload-path` for the copy. The common initializer
+is selected from its `initialization` entrypoint. Supply the workload command
+explicitly, and set its duration when it uses `ARG_WORKLOAD_DURATION_SECONDS`.
+The following reads your edited workload template and uses fast initialization:
 
 ```bash
-workload_init=$(python3 -c 'import json; print(json.load(open("workloads/pagila-local/profile.json"))["benchmark"]["init_command"])')
 workload_run=$(python3 -c 'import json; print(json.load(open("workloads/pagila-local/profile.json"))["benchmark"]["workload_command"])')
 
 PGPASSWORD=secret pg-perf-bench benchmark \
@@ -397,7 +423,6 @@ PGPASSWORD=secret pg-perf-bench benchmark \
   --workload-scale 4 \
   --workload-duration-seconds 120 \
   --pgbench-clients 1,2,4,8,16 \
-  --init-command "$workload_init" \
   --workload-command "$workload_run" \
   --command-timeout 300 \
   --report-name pagila-local-scale4
@@ -418,6 +443,7 @@ the manifest and `profile.json` itself. For a local profile, the report also
 captures the other files under `--workload-path`, including JSON, YAML, TOML,
 shell scripts and configuration files without extensions. The local manifest's
 `files` entries supply file roles; they do not select commands or defaults.
+The separate `initialization` entrypoint enables the common loader for custom profiles.
 Git/Mercurial/Subversion metadata, `.venv`, `venv`, `__pycache__`, `.pyc` and
 `.pyo` are excluded from automatic traversal. Keep reports, generated datasets
 and unrelated files outside the profile directory.
@@ -458,7 +484,7 @@ For example:
 
 ```bash
 PGPASSWORD=secret PGSSLMODE=require pg-perf-bench benchmark \
-  --managed-pg-info ./cloud-instance.yaml \
+  --managed-pg-info ./cloud-instance.yaml --init-fsync keep \
   --host db.example.cloud --port 5432 --user bench_owner \
   --database pg_perf_bench_test --allow-database-reset \
   --workload-profile pagila-htap --workload-scale 0.1 \
@@ -495,8 +521,9 @@ For each axis value in the regular mode without Patroni, the backend:
 3. stops PostgreSQL or the selected container;
 4. flushes filesystems and optionally drops host OS caches;
 5. starts PostgreSQL and recreates the database;
-6. runs the initialization command;
-7. runs `VACUUM ANALYZE` and captures the Before workload size snapshot;
+6. runs the common initializer or the legacy initialization command;
+7. completes `VACUUM ANALYZE`, restores temporary loader settings, waits for replicas
+   when using the common loader, and captures the Before workload size snapshot;
 8. runs the workload command while the `pg_diag` Linux sampler records CPU,
    RAM, disk and network metrics on the database host;
 9. waits for any remaining OS sampling to finish, then captures the After workload size snapshot;
@@ -724,8 +751,9 @@ items for **every iteration**:
 | Before workload | All database sizes; top 100 tables by total size; top 100 indexes by size |
 | After workload | All database sizes; top 100 tables by total size; top 100 indexes by size |
 
-The order is: recreate the workload database → run `init_command` → run
-`VACUUM ANALYZE` → collect **Before workload** → run `pgbench` → finish any
+The order is: recreate the workload database → initialize → run
+`VACUUM ANALYZE` → restore loader settings and wait for replicas in fast mode →
+collect **Before workload** → run `pgbench` → finish any
 remaining OS sampling → collect **After workload**. Preparation and size collection
 are outside the measured pgbench command. Waiting for the OS sampler prevents
 size-query CPU and I/O from entering its final samples. An explicit
@@ -905,6 +933,26 @@ asynchronous, FIRST, and ANY replication and a complete benchmark:
 ```bash
 PG_PERF_BENCH_REPLICATION_INTEGRATION=1 \
 python -m pytest -m integration tests/integration/test_replication_report.py
+```
+
+The common-loader suite uses disposable PostgreSQL 10/18 containers and also checks
+two synchronous physical replicas with a logical WAL consumer. Recovery tests cover
+SQL endpoint changes, restricted-role rejection before reset with a pending fsync
+journal, and replica disconnection/reconnection, including a changed IP address:
+
+```bash
+PG_PERF_BENCH_INIT_INTEGRATION=1 \
+  python -m pytest -q -m integration \
+    tests/integration/test_initialization.py \
+    tests/integration/test_initialization_recovery.py
+```
+
+For a repeatable speed measurement of approximately 1 GiB per profile, run the
+[manual loader benchmark](tests/benchmark/README.md). It provisions a primary and
+two synchronous replicas, calibrates the size and saves per-phase timings:
+
+```bash
+python -m tests.benchmark.initialization_speed --output /tmp/pg-perf-load-1g
 ```
 
 The legacy direct-Docker integration module is disabled unless

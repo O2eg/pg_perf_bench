@@ -37,6 +37,8 @@ def managed_arguments(path):
         '--allow-database-reset',
         '--workload-profile',
         'pagila-htap',
+        '--init-fsync',
+        'keep',
         '--workload-scale',
         '0.1',
         '--workload-duration-seconds',
@@ -139,7 +141,9 @@ def test_missing_or_non_file_metadata_fails_before_execution(tmp_path, directory
 def test_managed_run_only_uses_database_and_workload_clients(tmp_path):
     path = tmp_path / 'instance.yaml'
     path.write_text('provider: example\nmemory: 16 GiB\n', encoding='utf-8')
-    args = build_parser().parse_args([*managed_arguments(path), '--collect-pg-logs'])
+    args = build_parser().parse_args(
+        [*managed_arguments(path), '--collect-pg-logs', '--init-mode', 'legacy']
+    )
     tasks = MagicMock()
     for method in ('check_db_access', 'drop_db', 'init_db', 'check_user_db_access'):
         setattr(tasks, method, AsyncMock())

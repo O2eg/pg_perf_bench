@@ -67,11 +67,27 @@ def validate_workload_profile(profile: Any, *, expected_id: str | None = None) -
                 _safe_relative_path(value)
             except ValueError as exc:
                 errors.append(str(exc))
+    initialization = profile.get('initialization')
+    if initialization is not None:
+        if not isinstance(initialization, dict):
+            errors.append('initialization must be an object')
+        elif initialization.get('schema_version') != 'pg_perf_bench/load-plan-v1':
+            errors.append('initialization.schema_version must be pg_perf_bench/load-plan-v1')
+        else:
+            try:
+                entrypoint = initialization.get('entrypoint')
+                _safe_relative_path(entrypoint)
+                if isinstance(files, dict) and entrypoint not in files.get('generators', []):
+                    errors.append('initialization.entrypoint must be listed in files.generators')
+            except (TypeError, ValueError) as exc:
+                errors.append(str(exc))
     benchmark = profile.get('benchmark')
     if not isinstance(benchmark, dict):
         errors.append('benchmark must be an object')
     else:
-        for field in ('init_command', 'workload_command'):
+        for field in (
+            ('workload_command',) if initialization else ('init_command', 'workload_command')
+        ):
             if not isinstance(benchmark.get(field), str) or not benchmark[field].strip():
                 errors.append(f'benchmark.{field} must be a non-empty string')
         duration = benchmark.get('default_duration_seconds')
@@ -365,6 +381,19 @@ def build_workload_evidence(
         'workload_command_template': workload_conf.get('workload_command'),
         'resolved_commands': resolved_commands,
     }
+    initialization = {'mode': workload_conf.get('init_mode', 'legacy')}
+    if initialization['mode'] == 'fast':
+        from pg_perf_bench.initialization import LoadOptions
+
+        options = LoadOptions.from_config(workload_conf)
+        initialization.update(
+            entrypoint=workload_conf.get('init_entrypoint'),
+            workers=options.workers,
+            batch_rows=options.batch_rows,
+            table_mode=options.table_mode,
+            fsync=options.fsync,
+            synchronous_commit=options.synchronous_commit,
+        )
     definition_hash = canonical_hash(definition)
     execution_hash = canonical_hash(
         {
@@ -374,6 +403,7 @@ def build_workload_evidence(
             'iteration_parameter': pgbench['iteration_parameter'],
             'iteration_values': pgbench['iteration_values'],
             'workload_duration_seconds': workload_conf.get('workload_duration_seconds'),
+            'initialization': initialization,
         }
     )
     return {
@@ -384,4 +414,5 @@ def build_workload_evidence(
         'execution_hash': execution_hash,
         'files': sources,
         'pgbench': pgbench,
+        'initialization': initialization,
     }

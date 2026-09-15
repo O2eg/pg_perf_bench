@@ -314,7 +314,7 @@ raise SystemExit(main())
         client.close()
 
 
-def _arguments(root, node, *, transport, port, report_name):
+def _arguments(root, node, *, transport, port, report_name, fast=False):
     args = [
         'benchmark',
         '--connection-type',
@@ -350,6 +350,20 @@ def _arguments(root, node, *, transport, port, report_name):
         '--report-name',
         report_name,
     ]
+    if fast:
+        for option in ('--benchmark-type', '--init-command', '--workload-command'):
+            index = args.index(option)
+            del args[index : index + 2]
+        args += [
+            '--workload-profile',
+            'pagila-htap',
+            '--workload-scale',
+            '0.01',
+            '--workload-duration-seconds',
+            '1',
+            '--init-batch-rows',
+            '137',
+        ]
     if transport == 'docker':
         args += ['--container-name', node['container_name']]
     elif transport == 'ssh':
@@ -528,12 +542,27 @@ def test_patroni_benchmark_all_transports_and_plain_postgres(stand):
                     transport=transport,
                     port=port,
                     report_name=name,
+                    fast=True,
                 ),
             ],
             env=env,
             accepted=(0, 5),
         )
         _check_report((root / f'reports/{name}.json').read_text(), password, api_password)
+        fast_report = json.loads((root / f'reports/{name}.json').read_text())
+        assert fast_report['workload_evidence']['initialization']['mode'] == 'fast'
+        assert all(
+            run['initialization']['fsync_after'] == 'on' for run in fast_report['benchmark_runs']
+        )
+        assert _sql(container, 'SHOW fsync') == 'on'
+        assert (
+            _sql(
+                container,
+                "SELECT count(*) FROM pg_file_settings WHERE name='fsync' "
+                "AND sourcefile LIKE '%postgresql.auto.conf'",
+            )
+            == '0'
+        )
         assert (root / f'reports/{name}.html').is_file()
         assert previous != _sql(container, 'select pg_postmaster_start_time()')
         container.reload()

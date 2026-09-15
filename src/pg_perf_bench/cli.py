@@ -196,6 +196,37 @@ def build_parser() -> argparse.ArgumentParser:
     iterations.add_argument('--pgbench-clients', type=parse_pgbench_options)
     iterations.add_argument('--pgbench-time', type=parse_pgbench_options)
     benchmark.add_argument('--init-command')
+    benchmark.add_argument(
+        '--init-mode',
+        choices=('auto', 'fast', 'legacy'),
+        default='auto',
+        help='auto uses the common loader when the profile provides a load plan',
+    )
+    benchmark.add_argument(
+        '--init-workers',
+        type=positive_int,
+        default=4,
+        help='parallel data and index jobs (default: 4)',
+    )
+    benchmark.add_argument(
+        '--init-batch-rows',
+        type=positive_int,
+        default=100_000,
+        help='target rows per data transaction (default: 100000)',
+    )
+    benchmark.add_argument('--init-table-mode', choices=('unlogged', 'logged'), default='unlogged')
+    benchmark.add_argument(
+        '--init-fsync',
+        choices=('off', 'keep'),
+        default='off',
+        help='temporary primary fsync policy; off requires host access and superuser',
+    )
+    benchmark.add_argument(
+        '--init-synchronous-commit',
+        choices=('off', 'local', 'keep'),
+        default='off',
+        help='commit policy in every common-loader connection',
+    )
     benchmark.add_argument('--workload-command')
     benchmark.add_argument(
         '--pgbench-path',

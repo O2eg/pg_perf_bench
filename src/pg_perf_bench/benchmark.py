@@ -35,6 +35,14 @@ from pg_perf_bench.db_operations import (
 )
 from pg_perf_bench.db_operations.patroni import PatroniController
 from pg_perf_bench.errors import CollectionError
+from pg_perf_bench.executors.process import ProcessResult
+from pg_perf_bench.initialization import (
+    LoadOptions,
+    LoadPlan,
+    build_initialization_section,
+    load_plan,
+)
+from pg_perf_bench.initialization_settings import InitializationSettings, initialize_database
 from pg_perf_bench.log import display_user_configuration
 from pg_perf_bench.managed import (
     MANAGED_NO_DATA,
@@ -173,8 +181,15 @@ class BenchmarkRunner:
         Replaces placeholders (ARG_*) in the init_command and workload_command
         with actual config values and iteration-specific parameter.
         """
-        arg_values = {**db_conf, **workload_conf, pgbench_param: iter_amount}
+        arg_values = {
+            'python_path': sys.executable,
+            **db_conf,
+            **workload_conf,
+            pgbench_param: iter_amount,
+        }
         init_command = workload_conf['init_command']
+        if workload_conf.get('init_mode') == 'fast':
+            init_command = 'common-loader:' + str(workload_conf['init_entrypoint'])
         workload_command = workload_conf['workload_command']
 
         for key, value in arg_values.items():
@@ -311,6 +326,9 @@ class BenchmarkRunner:
         connection: Any = None,
         system_metrics_interval: float = 1.0,
         system_metrics_duration: float | None = None,
+        initialization_plan: LoadPlan | None = None,
+        initialization_options: LoadOptions | None = None,
+        required_replicas=None,
     ) -> dict[str, Any]:
         init_cmd, workload_cmd = load_iteration
         environment = os.environ.copy()
@@ -326,16 +344,39 @@ class BenchmarkRunner:
         if password:
             environment['PGPASSWORD'] = str(password)
         secrets = (str(password) if password else None,)
-        logger.info('Executing benchmark initialization command.')
-        init_result = await run_command_result(
-            logger,
-            init_cmd,
-            check=True,
-            timeout=command_timeout,
-            env=environment,
-            secrets=secrets,
-        )
-        await vacuum_analyze(logger, db_conf, command_timeout)
+        initialization = None
+        if initialization_plan is not None:
+            started_at = datetime.now(timezone.utc).isoformat()
+            started = time.monotonic()
+            initialization = await initialize_database(
+                logger,
+                initialization_plan,
+                db_conf,
+                initialization_options or LoadOptions(timeout=command_timeout),
+                connection_type,
+                connection,
+                required_replicas=required_replicas,
+            )
+            init_result = ProcessResult(
+                argv=(init_cmd,),
+                returncode=0,
+                stderr='',
+                started_at=started_at,
+                elapsed_seconds=time.monotonic() - started,
+                stdout='Common loader completed: data, LOGGED, indexes, constraints, '
+                'VACUUM ANALYZE, restored settings, replica replay barrier.\n',
+            )
+        else:
+            logger.info('Executing benchmark initialization command.')
+            init_result = await run_command_result(
+                logger,
+                init_cmd,
+                check=True,
+                timeout=command_timeout,
+                env=environment,
+                secrets=secrets,
+            )
+            await vacuum_analyze(logger, db_conf, command_timeout)
         logger.info('Collecting storage sizes before workload.')
         storage_before = await collect_storage_snapshot(logger, db_conf)
         logger.info('Executing pgbench workload command.')
@@ -388,6 +429,8 @@ class BenchmarkRunner:
         }
         if system_metrics is not None:
             result['system_metrics'] = system_metrics
+        if initialization is not None:
+            result['initialization'] = initialization
         return result
 
     @staticmethod
@@ -523,9 +566,33 @@ class BenchmarkRunner:
         Executes all load test iterations sequentially and gathers results.
         """
         perf_results = []
+        initialization_plan = None
+        initialization_options = None
+        if workload_conf.get('init_mode') == 'fast':
+            initialization_plan = load_plan(
+                Path(workload_conf['workload_path']).expanduser(),
+                workload_conf['init_entrypoint'],
+                workload_conf.get('workload_scale', 1.0),
+            )
+            initialization_options = LoadOptions.from_config(workload_conf)
         logger.info('Starting load iterations...')
         for idx, load_iteration in enumerate(load_iterations, start=1):
             logger.info(f'Preparing for iteration {idx}...')
+            required_replicas = None
+            if initialization_plan is not None or InitializationSettings.recovery_pending():
+                # Recover an interrupted fsync override and check privileges
+                # before the destructive reset. Reset can restart PostgreSQL,
+                # so initialization acquires a fresh connection afterward.
+                preflight = InitializationSettings(
+                    logger,
+                    db_conf,
+                    initialization_options or LoadOptions(fsync='keep'),
+                    conn_type,
+                    client,
+                )
+                await preflight.open(recover_only=initialization_plan is None)
+                required_replicas = preflight.replicas.copy()
+                await preflight.close()
             await BenchmarkRunner.reset_db_environment(
                 logger, conn_type, client, db_conf, workload_conf
             )
@@ -541,6 +608,9 @@ class BenchmarkRunner:
                         workload_conf.get('system_metrics_interval', 1.0)
                     ),
                     system_metrics_duration=workload_conf.get('system_metrics_duration'),
+                    initialization_plan=initialization_plan,
+                    initialization_options=initialization_options,
+                    required_replicas=required_replicas,
                 )
             )
             iteration_values = workload_conf.get('pgbench_iter_list', [])
@@ -651,6 +721,7 @@ class BenchmarkRunner:
                 'workload_execution_hash': workload_evidence['execution_hash'],
                 'vacuum_analyze_before_each_workload': True,
                 'storage_snapshots': ['before_workload', 'after_workload'],
+                'initialization': workload_evidence['initialization'],
                 'system_metrics_engine': None if managed_path else 'pg_diag',
                 'system_metrics_collected_during_workload': not bool(managed_path),
                 'system_metrics_interval_seconds': (
@@ -692,6 +763,10 @@ class BenchmarkRunner:
                 report['benchmark_runs'] = benchmark_runs
                 report['maximum_tps'] = BenchmarkRunner.maximum_tps(benchmark_runs)
                 report['sections']['storage'] = build_storage_section(benchmark_runs)
+                if workload_conf.get('init_mode') == 'fast':
+                    report['sections']['initialization'] = build_initialization_section(
+                        benchmark_runs, workload_evidence['initialization']
+                    )
                 report['sections']['os_metrics'] = build_system_metrics_section(benchmark_runs)
                 if managed_path:
                     section = report['sections']['os_metrics']

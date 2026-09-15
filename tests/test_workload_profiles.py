@@ -119,7 +119,9 @@ def test_profile_supplies_commands_and_report_evidence_embeds_all_sources():
         'manifest',
     }
     generator = next(source for source in evidence['files'] if source['role'] == 'generator')
-    assert 'subprocess.run' in generator['content']
+    assert 'build_load_plan' in generator['content']
+    assert 'run_tasks' in generator['content']
+    assert config.workload.init_mode == 'fast'
     assert 'det_uniform(g, 11)' in generator['content']
     assert len(evidence['pgbench']['resolved_commands']) == 2
 
@@ -144,7 +146,7 @@ def test_profile_supplies_commands_and_report_evidence_embeds_all_sources():
     assert '[setup] sql/imdb-fkindexes.sql' in init_item['data']
     assert '[query] sql/05_join_stress.sql' in query_item['data']
     assert '[query] sql/select_33.sql' in query_item['data']
-    assert len(evidence['files']) == 38 + 4  # queries + schema, generator, setup, manifest
+    assert len(evidence['files']) == 38 + 8  # queries, legacy assets, common-loader assets
     assert all('--random-seed=42' in pair[1] for pair in commands)
 
 

@@ -8,7 +8,7 @@ its curve with `pagila` to measure how much analytical load costs the shop: lock
 contention, planner and CPU pressure, and the effect of `work_mem`, parallel query and
 `shared_buffers` on mixed workloads.
 
-Schema, generator, setup script and the four OLTP scripts are byte-identical copies of the
+Schema, generator, common-loader assets, setup script and the four OLTP scripts are byte-identical copies of the
 `pagila` profile (a unit test enforces this); only the manifest and the reporting script
 differ. Weights: `01_select` 50, `02_insert` 25, `03_update` 20, `04_delete` 5,
 `05_reporting` 5. Everything said about scale, determinism, prepared mode and

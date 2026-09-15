@@ -11,11 +11,15 @@ memory/cache experiments.
 The deterministic generator creates companies, people, characters, titles, cast, keywords,
 movie attributes, indexed attributes and movie links. `--workload-scale 1` creates 100,000
 titles, 100,000 people and about 2 million fact, relationship and attribute rows; scale all
-major cardinalities together for larger systems. Measured on PostgreSQL 18, scale 1 holds
-about 330 MB of table and index data (template database excluded) and initializes in about
-10 seconds. Pick a scale whose data exceeds the cache you want to test, otherwise the sweep
+major cardinalities together for larger systems. The report records actual table and index
+sizes before and after each workload. Pick a scale whose data exceeds the cache you want to
+test, otherwise the sweep
 measures CPU on a fully cached working set. All pseudo-random columns come from `hashint8()`,
-not `random()`, so the dataset is byte-identical on PostgreSQL 10–18.
+not `random()`, so generated values are identical on PostgreSQL 10–18. Physical files and
+row ordering can differ. The [common initializer](../../../../INITIALIZATION.md) loads in
+bounded committed batches, builds indexes afterward in parallel and restores the normal
+durability/replication behavior before pgbench. Batch size and worker count do not change
+the generated values. `--init-mode legacy` preserves the command-based initialization path.
 
 Script cost ranges from a few milliseconds to about two seconds per transaction at scale 1,
 so the measured window defaults to 120 seconds (`--workload-duration-seconds` overrides it)

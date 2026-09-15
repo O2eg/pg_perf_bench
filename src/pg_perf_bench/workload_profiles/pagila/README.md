@@ -6,8 +6,8 @@ checkpoint, lock and storage-latency experiments and as the baseline for `pagila
 
 The deterministic generator creates countries, cities, customers, actors, films, inventory,
 rentals and payments. `--workload-scale 1` creates roughly the traditional Pagila
-cardinalities and about 9 MB of data; scale 4 holds about 28 MB (template database
-excluded). The whole database therefore sits in `shared_buffers` at low scales; raise the
+cardinalities. Actual sizes depend on the server and index storage; the report records
+them before and after the workload. Small scales fit in `shared_buffers`; raise the
 scale until the data exceeds the cache under test. The schema and generator run unchanged on
 PostgreSQL 10–18, and pseudo-random values come from `hashint8()`, so the dataset is
 identical on every server major.
@@ -22,13 +22,15 @@ records a rental with its payment; customer registration (10 %), new films (5 %)
 inventory (10 %), new staff and new stores (0.2 % each) are gated by pgbench-side
 probabilities so the data keeps a shop-like shape during the measured window.
 
-`sql/pagila-benchmark-setup.sql` runs after the generator: it adds the Sakila indexes that
-Pagila dropped (rental by customer, inventory by film, film_category by category, payment by
-rental), sets `search_path` for the database and for the benchmark role inside it (the
-schema-less Pagila functions need it, and a role-level `search_path` would otherwise win),
-refreshes the
-materialized view, fills `bench_bounds` and runs `VACUUM (FREEZE, ANALYZE)` so the measured window starts with
-frozen pages and fresh statistics.
+The [common initializer](../../../../INITIALIZATION.md) loads bounded batches into
+UNLOGGED tables, converts them to LOGGED, and builds all indexes afterward with the
+shared parallel scheduler. It sets database/role `search_path`, refreshes the materialized
+view, fills `bench_bounds` and runs `VACUUM (FREEZE, ANALYZE)`. Original durability settings
+are restored and directly connected replicas catch up before pgbench. Identifiers use
+bigint, and generation does not depend on batch size or worker scheduling.
+
+`sql/pagila-schema.sql` and `sql/pagila-benchmark-setup.sql` remain the legacy path
+for `--init-mode legacy`; the generator CLI also uses bounded data batches.
 
 Example selection (connection and safety arguments omitted):
 

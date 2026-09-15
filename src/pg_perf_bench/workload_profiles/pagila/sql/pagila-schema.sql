@@ -72,7 +72,7 @@ $_$;
 -- Name: film_in_stock(integer, integer); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
-CREATE FUNCTION pagila.film_in_stock(p_film_id integer, p_store_id integer, OUT p_film_count integer) RETURNS SETOF integer
+CREATE FUNCTION pagila.film_in_stock(p_film_id bigint, p_store_id bigint, OUT p_film_count bigint) RETURNS SETOF bigint
     LANGUAGE sql
     AS $_$
      SELECT inventory_id
@@ -87,7 +87,7 @@ $_$;
 -- Name: film_not_in_stock(integer, integer); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
-CREATE FUNCTION pagila.film_not_in_stock(p_film_id integer, p_store_id integer, OUT p_film_count integer) RETURNS SETOF integer
+CREATE FUNCTION pagila.film_not_in_stock(p_film_id bigint, p_store_id bigint, OUT p_film_count bigint) RETURNS SETOF bigint
     LANGUAGE sql
     AS $_$
     SELECT inventory_id
@@ -105,7 +105,7 @@ $_$;
 -- pg_perf_bench: rental fees and payments are accumulated as unbounded numeric.
 -- The upstream DECIMAL(5,2) locals overflow ("numeric field overflow") for the
 -- heaviest customers of the skewed generator, which aborts the pgbench client.
-CREATE OR REPLACE FUNCTION pagila.get_customer_balance(p_customer_id integer, p_effective_date timestamp with time zone)
+CREATE OR REPLACE FUNCTION pagila.get_customer_balance(p_customer_id bigint, p_effective_date timestamp with time zone)
 RETURNS numeric
 LANGUAGE plpgsql
 AS $$
@@ -148,11 +148,11 @@ $$;
 -- Name: inventory_held_by_customer(integer); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
-CREATE FUNCTION pagila.inventory_held_by_customer(p_inventory_id integer) RETURNS integer
+CREATE FUNCTION pagila.inventory_held_by_customer(p_inventory_id bigint) RETURNS bigint
     LANGUAGE plpgsql
     AS $$
 DECLARE
-    v_customer_id INTEGER;
+    v_customer_id bigint;
 BEGIN
 
   SELECT customer_id INTO v_customer_id
@@ -168,7 +168,7 @@ END $$;
 -- Name: inventory_in_stock(integer); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
-CREATE FUNCTION pagila.inventory_in_stock(p_inventory_id integer) RETURNS boolean
+CREATE FUNCTION pagila.inventory_in_stock(p_inventory_id bigint) RETURNS boolean
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -247,12 +247,12 @@ SET default_tablespace = '';
 --
 
 CREATE TABLE pagila.customer (
-    customer_id integer DEFAULT nextval('pagila.customer_customer_id_seq'::regclass) NOT NULL,
-    store_id integer NOT NULL,
+    customer_id bigint DEFAULT nextval('pagila.customer_customer_id_seq'::regclass) NOT NULL,
+    store_id bigint NOT NULL,
     first_name text NOT NULL,
     last_name text NOT NULL,
     email text,
-    address_id integer NOT NULL,
+    address_id bigint NOT NULL,
     activebool boolean DEFAULT true NOT NULL,
     create_date date DEFAULT CURRENT_DATE NOT NULL,
     last_update timestamp with time zone DEFAULT now(),
@@ -289,7 +289,7 @@ BEGIN
     /*
     Create a temporary storage area for Customer IDs.
     */
-    CREATE TEMPORARY TABLE tmpCustomer (customer_id INTEGER NOT NULL PRIMARY KEY);
+    CREATE TEMPORARY TABLE tmpCustomer (customer_id bigint NOT NULL PRIMARY KEY);
 
     /*
     Find all customers meeting the monthly purchase requirements
@@ -346,7 +346,7 @@ CREATE SEQUENCE pagila.actor_actor_id_seq
 --
 
 CREATE TABLE pagila.actor (
-    actor_id integer DEFAULT nextval('pagila.actor_actor_id_seq'::regclass) NOT NULL,
+    actor_id bigint DEFAULT nextval('pagila.actor_actor_id_seq'::regclass) NOT NULL,
     first_name text NOT NULL,
     last_name text NOT NULL,
     last_update timestamp with time zone DEFAULT now() NOT NULL
@@ -368,7 +368,7 @@ CREATE SEQUENCE pagila.category_category_id_seq
 --
 
 CREATE TABLE pagila.category (
-    category_id integer DEFAULT nextval('pagila.category_category_id_seq'::regclass) NOT NULL,
+    category_id bigint DEFAULT nextval('pagila.category_category_id_seq'::regclass) NOT NULL,
     name text NOT NULL,
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -389,12 +389,12 @@ CREATE SEQUENCE pagila.film_film_id_seq
 --
 
 CREATE TABLE pagila.film (
-    film_id integer DEFAULT nextval('pagila.film_film_id_seq'::regclass) NOT NULL,
+    film_id bigint DEFAULT nextval('pagila.film_film_id_seq'::regclass) NOT NULL,
     title text NOT NULL,
     description text,
     release_year pagila.year,
-    language_id integer NOT NULL,
-    original_language_id integer,
+    language_id bigint NOT NULL,
+    original_language_id bigint,
     rental_duration smallint DEFAULT 3 NOT NULL,
     rental_rate numeric(4,2) DEFAULT 4.99 NOT NULL,
     length smallint,
@@ -410,8 +410,8 @@ CREATE TABLE pagila.film (
 --
 
 CREATE TABLE pagila.film_actor (
-    actor_id integer NOT NULL,
-    film_id integer NOT NULL,
+    actor_id bigint NOT NULL,
+    film_id bigint NOT NULL,
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -420,8 +420,8 @@ CREATE TABLE pagila.film_actor (
 --
 
 CREATE TABLE pagila.film_category (
-    film_id integer NOT NULL,
-    category_id integer NOT NULL,
+    film_id bigint NOT NULL,
+    category_id bigint NOT NULL,
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -461,11 +461,11 @@ CREATE SEQUENCE pagila.address_address_id_seq
 --
 
 CREATE TABLE pagila.address (
-    address_id integer DEFAULT nextval('pagila.address_address_id_seq'::regclass) NOT NULL,
+    address_id bigint DEFAULT nextval('pagila.address_address_id_seq'::regclass) NOT NULL,
     address text NOT NULL,
     address2 text,
     district text NOT NULL,
-    city_id integer NOT NULL,
+    city_id bigint NOT NULL,
     postal_code text,
     phone text NOT NULL,
     last_update timestamp with time zone DEFAULT now() NOT NULL
@@ -487,9 +487,9 @@ CREATE SEQUENCE pagila.city_city_id_seq
 --
 
 CREATE TABLE pagila.city (
-    city_id integer DEFAULT nextval('pagila.city_city_id_seq'::regclass) NOT NULL,
+    city_id bigint DEFAULT nextval('pagila.city_city_id_seq'::regclass) NOT NULL,
     city text NOT NULL,
-    country_id integer NOT NULL,
+    country_id bigint NOT NULL,
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -509,7 +509,7 @@ CREATE SEQUENCE pagila.country_country_id_seq
 --
 
 CREATE TABLE pagila.country (
-    country_id integer DEFAULT nextval('pagila.country_country_id_seq'::regclass) NOT NULL,
+    country_id bigint DEFAULT nextval('pagila.country_country_id_seq'::regclass) NOT NULL,
     country text NOT NULL,
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -572,9 +572,9 @@ CREATE SEQUENCE pagila.inventory_inventory_id_seq
 --
 
 CREATE TABLE pagila.inventory (
-    inventory_id integer DEFAULT nextval('pagila.inventory_inventory_id_seq'::regclass) NOT NULL,
-    film_id integer NOT NULL,
-    store_id integer NOT NULL,
+    inventory_id bigint DEFAULT nextval('pagila.inventory_inventory_id_seq'::regclass) NOT NULL,
+    film_id bigint NOT NULL,
+    store_id bigint NOT NULL,
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -594,7 +594,7 @@ CREATE SEQUENCE pagila.language_language_id_seq
 --
 
 CREATE TABLE pagila.language (
-    language_id integer DEFAULT nextval('pagila.language_language_id_seq'::regclass) NOT NULL,
+    language_id bigint DEFAULT nextval('pagila.language_language_id_seq'::regclass) NOT NULL,
     name character(20) NOT NULL,
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -636,10 +636,10 @@ CREATE SEQUENCE pagila.payment_payment_id_seq
 --
 
 CREATE TABLE pagila.payment (
-    payment_id integer DEFAULT nextval('pagila.payment_payment_id_seq'::regclass) NOT NULL,
-    customer_id integer NOT NULL,
-    staff_id integer NOT NULL,
-    rental_id integer NOT NULL,
+    payment_id bigint DEFAULT nextval('pagila.payment_payment_id_seq'::regclass) NOT NULL,
+    customer_id bigint NOT NULL,
+    staff_id bigint NOT NULL,
+    rental_id bigint NOT NULL,
     amount numeric(5,2) NOT NULL,
     payment_date timestamp with time zone NOT NULL
 )
@@ -650,10 +650,10 @@ PARTITION BY RANGE (payment_date);
 --
 
 CREATE TABLE pagila.payment_p2022_01 (
-    payment_id integer DEFAULT nextval('pagila.payment_payment_id_seq'::regclass) NOT NULL,
-    customer_id integer NOT NULL,
-    staff_id integer NOT NULL,
-    rental_id integer NOT NULL,
+    payment_id bigint DEFAULT nextval('pagila.payment_payment_id_seq'::regclass) NOT NULL,
+    customer_id bigint NOT NULL,
+    staff_id bigint NOT NULL,
+    rental_id bigint NOT NULL,
     amount numeric(5,2) NOT NULL,
     payment_date timestamp with time zone NOT NULL
 );
@@ -663,10 +663,10 @@ CREATE TABLE pagila.payment_p2022_01 (
 --
 
 CREATE TABLE pagila.payment_p2022_02 (
-    payment_id integer DEFAULT nextval('pagila.payment_payment_id_seq'::regclass) NOT NULL,
-    customer_id integer NOT NULL,
-    staff_id integer NOT NULL,
-    rental_id integer NOT NULL,
+    payment_id bigint DEFAULT nextval('pagila.payment_payment_id_seq'::regclass) NOT NULL,
+    customer_id bigint NOT NULL,
+    staff_id bigint NOT NULL,
+    rental_id bigint NOT NULL,
     amount numeric(5,2) NOT NULL,
     payment_date timestamp with time zone NOT NULL
 );
@@ -676,10 +676,10 @@ CREATE TABLE pagila.payment_p2022_02 (
 --
 
 CREATE TABLE pagila.payment_p2022_03 (
-    payment_id integer DEFAULT nextval('pagila.payment_payment_id_seq'::regclass) NOT NULL,
-    customer_id integer NOT NULL,
-    staff_id integer NOT NULL,
-    rental_id integer NOT NULL,
+    payment_id bigint DEFAULT nextval('pagila.payment_payment_id_seq'::regclass) NOT NULL,
+    customer_id bigint NOT NULL,
+    staff_id bigint NOT NULL,
+    rental_id bigint NOT NULL,
     amount numeric(5,2) NOT NULL,
     payment_date timestamp with time zone NOT NULL
 );
@@ -689,10 +689,10 @@ CREATE TABLE pagila.payment_p2022_03 (
 --
 
 CREATE TABLE pagila.payment_p2022_04 (
-    payment_id integer DEFAULT nextval('pagila.payment_payment_id_seq'::regclass) NOT NULL,
-    customer_id integer NOT NULL,
-    staff_id integer NOT NULL,
-    rental_id integer NOT NULL,
+    payment_id bigint DEFAULT nextval('pagila.payment_payment_id_seq'::regclass) NOT NULL,
+    customer_id bigint NOT NULL,
+    staff_id bigint NOT NULL,
+    rental_id bigint NOT NULL,
     amount numeric(5,2) NOT NULL,
     payment_date timestamp with time zone NOT NULL
 );
@@ -702,10 +702,10 @@ CREATE TABLE pagila.payment_p2022_04 (
 --
 
 CREATE TABLE pagila.payment_p2022_05 (
-    payment_id integer DEFAULT nextval('pagila.payment_payment_id_seq'::regclass) NOT NULL,
-    customer_id integer NOT NULL,
-    staff_id integer NOT NULL,
-    rental_id integer NOT NULL,
+    payment_id bigint DEFAULT nextval('pagila.payment_payment_id_seq'::regclass) NOT NULL,
+    customer_id bigint NOT NULL,
+    staff_id bigint NOT NULL,
+    rental_id bigint NOT NULL,
     amount numeric(5,2) NOT NULL,
     payment_date timestamp with time zone NOT NULL
 );
@@ -715,10 +715,10 @@ CREATE TABLE pagila.payment_p2022_05 (
 --
 
 CREATE TABLE pagila.payment_p2022_06 (
-    payment_id integer DEFAULT nextval('pagila.payment_payment_id_seq'::regclass) NOT NULL,
-    customer_id integer NOT NULL,
-    staff_id integer NOT NULL,
-    rental_id integer NOT NULL,
+    payment_id bigint DEFAULT nextval('pagila.payment_payment_id_seq'::regclass) NOT NULL,
+    customer_id bigint NOT NULL,
+    staff_id bigint NOT NULL,
+    rental_id bigint NOT NULL,
     amount numeric(5,2) NOT NULL,
     payment_date timestamp with time zone NOT NULL
 );
@@ -728,10 +728,10 @@ CREATE TABLE pagila.payment_p2022_06 (
 --
 
 CREATE TABLE pagila.payment_p2022_07 (
-    payment_id integer DEFAULT nextval('pagila.payment_payment_id_seq'::regclass) NOT NULL,
-    customer_id integer NOT NULL,
-    staff_id integer NOT NULL,
-    rental_id integer NOT NULL,
+    payment_id bigint DEFAULT nextval('pagila.payment_payment_id_seq'::regclass) NOT NULL,
+    customer_id bigint NOT NULL,
+    staff_id bigint NOT NULL,
+    rental_id bigint NOT NULL,
     amount numeric(5,2) NOT NULL,
     payment_date timestamp with time zone NOT NULL
 );
@@ -752,12 +752,12 @@ CREATE SEQUENCE pagila.rental_rental_id_seq
 --
 
 CREATE TABLE pagila.rental (
-    rental_id integer DEFAULT nextval('pagila.rental_rental_id_seq'::regclass) NOT NULL,
+    rental_id bigint DEFAULT nextval('pagila.rental_rental_id_seq'::regclass) NOT NULL,
     rental_date timestamp with time zone NOT NULL,
-    inventory_id integer NOT NULL,
-    customer_id integer NOT NULL,
+    inventory_id bigint NOT NULL,
+    customer_id bigint NOT NULL,
     return_date timestamp with time zone,
-    staff_id integer NOT NULL,
+    staff_id bigint NOT NULL,
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -811,12 +811,12 @@ CREATE SEQUENCE pagila.staff_staff_id_seq
 --
 
 CREATE TABLE pagila.staff (
-    staff_id integer DEFAULT nextval('pagila.staff_staff_id_seq'::regclass) NOT NULL,
+    staff_id bigint DEFAULT nextval('pagila.staff_staff_id_seq'::regclass) NOT NULL,
     first_name text NOT NULL,
     last_name text NOT NULL,
-    address_id integer NOT NULL,
+    address_id bigint NOT NULL,
     email text,
-    store_id integer NOT NULL,
+    store_id bigint NOT NULL,
     active boolean DEFAULT true NOT NULL,
     username text NOT NULL,
     password text,
@@ -840,9 +840,9 @@ CREATE SEQUENCE pagila.store_store_id_seq
 --
 
 CREATE TABLE pagila.store (
-    store_id integer DEFAULT nextval('pagila.store_store_id_seq'::regclass) NOT NULL,
-    manager_staff_id integer NOT NULL,
-    address_id integer NOT NULL,
+    store_id bigint DEFAULT nextval('pagila.store_store_id_seq'::regclass) NOT NULL,
+    manager_staff_id bigint NOT NULL,
+    address_id bigint NOT NULL,
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
 

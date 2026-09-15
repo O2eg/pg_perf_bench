@@ -43,8 +43,8 @@ WITH new_rental AS (
 )
 INSERT INTO payment (customer_id, staff_id, rental_id, amount, payment_date)
 SELECT
-    :customer_id::integer,
-    :staff_id::integer,
+    :customer_id::bigint,
+    :staff_id::bigint,
     nr.rental_id,
     (SELECT f.rental_rate
      FROM inventory i
@@ -71,7 +71,7 @@ WITH new_address AS (
 INSERT INTO customer
     (store_id, first_name, last_name, email, address_id, activebool, create_date, active)
 SELECT
-    :store_id::integer,
+    :store_id::bigint,
     'Name' || :suffix,
     'Surname' || (:suffix % 1000),
     'customer' || :suffix || '@example.test',
@@ -106,21 +106,21 @@ WITH new_film AS (
 ),
 new_film_category AS (
     INSERT INTO film_category (film_id, category_id)
-    SELECT film_id, :category_id::integer FROM new_film
+    SELECT film_id, :category_id::bigint FROM new_film
 ),
 new_film_actor AS (
     INSERT INTO film_actor (actor_id, film_id)
-    SELECT :actor_id::integer, film_id FROM new_film
+    SELECT :actor_id::bigint, film_id FROM new_film
 )
 INSERT INTO inventory (film_id, store_id)
-SELECT film_id, :store_id::integer FROM new_film;
+SELECT film_id, :store_id::bigint FROM new_film;
 COMMIT;
 \endif
 
 -- Extra copies of a film for a store (one transaction in ten)
 \if :chance_stock <= 10
 INSERT INTO inventory (film_id, store_id)
-SELECT :film_id::integer, :store_id::integer
+SELECT :film_id::bigint, :store_id::bigint
 FROM generate_series(1, :copies::integer);
 \endif
 
@@ -144,7 +144,7 @@ SELECT
     'StaffSurname' || (:suffix % 1000),
     na.address_id,
     'staff' || :suffix || '@example.test',
-    :store_id::integer,
+    :store_id::bigint,
     true,
     'staff_' || :suffix,
     NULL
@@ -167,7 +167,7 @@ WITH new_staff AS (
     FOR UPDATE SKIP LOCKED
 )
 INSERT INTO store (manager_staff_id, address_id)
-SELECT staff_id, :address_id::integer
+SELECT staff_id, :address_id::bigint
 FROM new_staff
 ON CONFLICT (manager_staff_id) DO NOTHING;
 COMMIT;

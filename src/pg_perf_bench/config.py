@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import stat
@@ -193,6 +194,13 @@ class WorkloadConfig:
     system_metrics_interval: float = 1.0
     system_metrics_duration: float | None = None
     managed_pg_info: str | None = None
+    init_mode: str = 'legacy'
+    init_entrypoint: str | None = None
+    init_workers: int = 4
+    init_batch_rows: int = 100_000
+    init_table_mode: str = 'unlogged'
+    init_fsync: str = 'off'
+    init_synchronous_commit: str = 'off'
 
     def as_legacy_dict(self, host: HostConfig) -> dict[str, Any]:
         return {
@@ -215,6 +223,13 @@ class WorkloadConfig:
             'system_metrics_interval': self.system_metrics_interval,
             'system_metrics_duration': self.system_metrics_duration,
             'managed_pg_info': self.managed_pg_info,
+            'init_mode': self.init_mode,
+            'init_entrypoint': self.init_entrypoint,
+            'init_workers': self.init_workers,
+            'init_batch_rows': self.init_batch_rows,
+            'init_table_mode': self.init_table_mode,
+            'init_fsync': self.init_fsync,
+            'init_synchronous_commit': self.init_synchronous_commit,
         }
 
 
@@ -378,19 +393,61 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
         custom_config = values.get('pg_custom_config')
         if custom_config and not Path(str(custom_config)).expanduser().is_file():
             raise ConfigurationError(f'--pg-custom-config does not exist: {custom_config}')
+        loader_profile = profile
+        if loader_profile is None and workload_path:
+            manifest = Path(workload_path).expanduser() / 'profile.json'
+            if manifest.is_file():
+                try:
+                    loader_profile = json.loads(manifest.read_text(encoding='utf-8'))
+                except (ValueError, OSError) as exc:
+                    raise ConfigurationError(f'Cannot read profile manifest: {manifest}') from exc
+        if loader_profile is not None and not isinstance(loader_profile, dict):
+            raise ConfigurationError('Profile manifest must be an object')
+        initialization = (loader_profile or {}).get('initialization') or {}
+        if initialization and (
+            not isinstance(initialization, dict)
+            or initialization.get('schema_version') != 'pg_perf_bench/load-plan-v1'
+            or not isinstance(initialization.get('entrypoint'), str)
+        ):
+            raise ConfigurationError('Unsupported profile initialization interface')
+        init_mode = values.get('init_mode', 'auto')
+        if init_mode == 'auto':
+            init_mode = 'fast' if initialization and not values.get('init_command') else 'legacy'
+        if init_mode == 'fast':
+            if not initialization:
+                raise ConfigurationError(
+                    '--init-mode fast requires a profile initialization entrypoint'
+                )
+            if values.get('init_command'):
+                raise ConfigurationError('--init-mode fast cannot be combined with --init-command')
+            entrypoint = (Path(workload_path).expanduser() / initialization['entrypoint']).resolve()
+            if not entrypoint.is_file() or not entrypoint.is_relative_to(
+                Path(workload_path).expanduser().resolve()
+            ):
+                raise ConfigurationError('Initialization entrypoint must be inside the profile')
+            if managed_pg_info and values.get('init_fsync', 'off') == 'off':
+                raise ConfigurationError('Managed fast initialization requires --init-fsync keep')
+        init_command = values.get('init_command') or (
+            profile['benchmark'].get('init_command') if profile is not None else None
+        )
+        if init_mode == 'legacy':
+            _required(init_command, '--init-command')
         pgbench, psql = select_local_clients(
             values.get('pgbench_path'),
             values.get('psql_path'),
         )
         workload = WorkloadConfig(
             benchmark_type=benchmark_type,
-            init_command=str(
-                _required(
-                    values.get('init_command')
-                    or (profile['benchmark']['init_command'] if profile is not None else None),
-                    '--init-command',
-                )
+            init_command=str(init_command or ''),
+            init_mode=init_mode,
+            init_entrypoint=initialization.get('entrypoint') if init_mode == 'fast' else None,
+            init_workers=_positive_int(values.get('init_workers', 4), '--init-workers'),
+            init_batch_rows=_positive_int(
+                values.get('init_batch_rows', 100_000), '--init-batch-rows'
             ),
+            init_table_mode=values.get('init_table_mode', 'unlogged'),
+            init_fsync=values.get('init_fsync', 'off'),
+            init_synchronous_commit=values.get('init_synchronous_commit', 'off'),
             workload_command=str(
                 _required(
                     values.get('workload_command')
