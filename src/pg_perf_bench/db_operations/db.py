@@ -99,6 +99,11 @@ class DBTasks:
             'database': database,
             'password': self.db_conf.get('password'),
             'timeout': self.connect_timeout,
+            **(
+                {'statement_cache_size': self.db_conf['statement_cache_size']}
+                if 'statement_cache_size' in self.db_conf
+                else {}
+            ),
         }
 
     @asynccontextmanager

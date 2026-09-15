@@ -14,8 +14,8 @@ identical on every server major.
 
 Four pgbench scripts run with fixed weights: `01_select` 50 %, `02_insert` 25 %,
 `03_update` 20 %, `04_delete` 5 %. Every random identifier is chosen by pgbench within
-table bounds read from the one-row `bench_bounds` table, statements run in prepared mode,
-and dates are offsets inside the generated 2022 range. Identifier selection avoids scans
+table bounds read from the one-row `bench_bounds` table, and dates are offsets
+inside the generated 2022 range. Identifier selection avoids scans
 over growing tables, while transaction cost still depends on data size and caching.
 `--random-seed=42` repeats random choices with the same client configuration; timed runs
 can still complete different numbers of transactions and yield different mix proportions.
@@ -23,6 +23,9 @@ Every insert transaction
 records a rental with its payment; customer registration (10 %), new films (5 %), extra
 inventory (10 %), new staff and new stores (0.2 % each) are gated by pgbench-side
 probabilities so the data keeps a shop-like shape during the measured window.
+
+The default query protocol is simple. Add `--pgbench-prepared` for prepared
+statements, and use the same setting on both sides of a comparison.
 
 The [common initializer](../../../../INITIALIZATION.md) loads bounded batches into
 UNLOGGED tables, converts them to LOGGED, and builds all indexes afterward with the

@@ -1,10 +1,12 @@
 import asyncio
+import shlex
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from pg_perf_bench.benchmark import BenchmarkRunner
 from pg_perf_bench.cli import _runtime_plan, build_parser
-from pg_perf_bench.config import build_runtime_config
+from pg_perf_bench.config import build_runtime_config, pgbench_protocol
 from pg_perf_bench.const import ConnectionType
 from pg_perf_bench.db_operations.db import validate_reset_schemas
 from pg_perf_bench.errors import ConfigurationError
@@ -71,6 +73,87 @@ def test_loader_commit_override_is_explicit_and_changes_execution_hash(policy):
     second = build_workload_evidence(accelerated.workload.as_legacy_dict(accelerated.host), [])
     assert first['definition_hash'] == second['definition_hash']
     assert first['execution_hash'] != second['execution_hash']
+
+
+@pytest.mark.parametrize('profile', ['pagila', 'pagila-htap', 'imdb'])
+def test_pgbench_protocol_cli_commands_report_and_join_hash(profile):
+    parser = build_parser()
+    cli = arguments() + ['--workload-profile', profile]
+    simple = build_runtime_config(parser.parse_args(cli))
+    prepared = build_runtime_config(parser.parse_args(cli + ['--pgbench-prepared']))
+    evidence = []
+    for config, protocol in ((simple, 'simple'), (prepared, 'prepared')):
+        workload = config.workload.as_legacy_dict(config.host)
+        commands = BenchmarkRunner.load_iterations_config(
+            config.database.as_asyncpg_kwargs(), workload
+        )
+        assert all(f'-M {protocol}' in command[1] for command in commands)
+        assert all('ARG_' not in command[1] for command in commands)
+        summary = BenchmarkRunner.build_invocation_summary('managed', {}, workload)
+        assert summary['workload']['pgbench_protocol'] == protocol
+        evidence.append(build_workload_evidence(workload, commands))
+    assert evidence[0]['definition_hash'] == evidence[1]['definition_hash']
+    assert evidence[0]['execution_hash'] != evidence[1]['execution_hash']
+    assert _runtime_plan(simple)['plan_hash'] != _runtime_plan(prepared)['plan_hash']
+
+
+@pytest.mark.parametrize('option', ['-M prepared', '--protocol=prepared', '-Mprepared'])
+def test_custom_command_keeps_explicit_prepared_protocol(option):
+    config = build_runtime_config(
+        build_parser().parse_args(
+            arguments() + ['--workload-command', f'ARG_PGBENCH_PATH {option} ARG_PG_DATABASE']
+        )
+    )
+    assert config.workload.pgbench_protocol == 'prepared'
+
+
+def test_prepared_flag_requires_custom_command_to_use_protocol():
+    with pytest.raises(ConfigurationError, match='ARG_PGBENCH_PROTOCOL'):
+        pgbench_protocol('pgbench -M simple db', prepared=True)
+    assert pgbench_protocol('pgbench db', prepared=False) == 'simple'
+    assert pgbench_protocol('pgbench --protocol extended db', prepared=False) == 'extended'
+
+
+@pytest.mark.parametrize('shell', ['bash -c', '/bin/bash -lc', 'sh -ec'])
+@pytest.mark.parametrize('option', ['prepared', 'ARG_PGBENCH_PROTOCOL'])
+def test_wrapped_protocol_in_cli_commands_and_report(shell, option):
+    inner = f'ARG_PGBENCH_PATH -c ARG_PGBENCH_CLIENTS ARG_PG_DATABASE -M {option}'
+    command = shell + ' ' + shlex.quote(inner)
+    flags = ['--pgbench-prepared'] if option.startswith('ARG_') else []
+    config = build_runtime_config(
+        build_parser().parse_args(arguments() + ['--workload-command', command] + flags)
+    )
+    workload = config.workload.as_legacy_dict(config.host)
+    assert workload['pgbench_protocol'] == 'prepared'
+    commands = BenchmarkRunner.load_iterations_config(config.database.as_legacy_dict(), workload)
+    assert all('-M prepared' in pair[1] and 'ARG_' not in pair[1] for pair in commands)
+    summary = BenchmarkRunner.build_invocation_summary('managed', {}, workload)
+    assert summary['workload']['pgbench_protocol'] == 'prepared'
+
+
+@pytest.mark.parametrize(
+    'command',
+    [
+        'pgbench db -M prepared; echo done',
+        'pgbench -M prepared db\nprintf done',
+        'env PGSSLMODE=require pgbench -M prepared db && echo --protocol simple',
+        "echo '-M simple' | pgbench -M prepared db",
+        'bash -c \'sh -c "pgbench -M prepared db"\'',
+    ],
+)
+def test_protocol_ignores_other_shell_commands(command):
+    assert pgbench_protocol(command, prepared=False) == 'prepared'
+
+
+@pytest.mark.parametrize('command', ['run-bench.sh', 'bash run-bench.sh', 'pgbench -M "$MODE" db'])
+def test_opaque_commands_are_not_assumed_simple(command):
+    assert pgbench_protocol(command, prepared=False) == 'unknown'
+
+
+def test_opaque_wrapper_can_accept_explicit_protocol_argument():
+    assert pgbench_protocol('run-bench.sh ARG_PGBENCH_PROTOCOL', prepared=True) == 'prepared'
+    with pytest.raises(ConfigurationError, match='same protocol'):
+        pgbench_protocol('pgbench -M simple db; pgbench -M prepared db', prepared=False)
 
 
 @pytest.mark.parametrize(

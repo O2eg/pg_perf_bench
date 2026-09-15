@@ -52,47 +52,83 @@ replication are outside this primary-side barrier.
 
 ## Connection pooling
 
-Use a direct primary endpoint or session pooling. With Odyssey, configure:
+Use a direct primary endpoint or session pooling. Transaction/statement pooling
+is unsupported. Bundled workloads use pgbench's **simple** protocol by default;
+`--pgbench-prepared` opts into `-M prepared` on all three profiles.
 
-```text
-# Global setting:
-smart_search_path_enquoting yes
+For managed runs the pgbench/psql startup option contains only the profile schema,
+without `public`: `PGOPTIONS='-c search_path=pagila'` (or `imdb`). This single bare
+identifier works through Odyssey even when `smart_search_path_enquoting` is
+unavailable. PostgreSQL still resolves built-in objects through `pg_catalog`.
+The bundled workloads do not need `public` in this path. Database and role defaults
+are not changed. `ALTER DATABASE/ROLE ... SET search_path` is not a fallback:
+on the tested MDB endpoint these commands succeeded but did not affect new sessions.
 
-# Inside the benchmark database/user route:
-pool "session"
-pool_discard yes
-pool_rollback yes
-```
+A custom profile with several schemas or names requiring quotes still needs an
+endpoint that preserves that list. With configurable Odyssey, enable
+`smart_search_path_enquoting yes`; otherwise use a compatible direct endpoint.
+Non-managed runs retain the quoted schema list followed by `public`.
 
-`smart_search_path_enquoting` preserves multi-schema `search_path` supplied by
-libpq clients. `pool_discard` cleans server prepared statements when a client
-leaves; pgbench reuses statement names in subsequent processes. See the Odyssey
+Before schema reset, psql verifies the actual startup `search_path`, including
+schemas that do not exist yet. A rewritten value fails before deleting schemas.
+With `--pgbench-prepared` (or an explicit prepared custom command), two additional
+read-only pgbench probes run `SELECT 1` to check reuse of prepared statement names.
+Prepared mode needs `pool_discard yes` or equivalent cleanup between clients.
+The default simple protocol does not need that prepared-statement cleanup, and
+skips those probes. If the provider cannot enable cleanup, use the default protocol.
+Opaque custom scripts with an `unknown` protocol retain the prepared probes;
+see [custom protocol declarations](workload_description.md#pgbench-protocol).
+The probes check common incompatibilities; they do not identify every pooler's mode.
+No workload SQL runs until initialization and the physical replay barrier finish.
+
+For configurable Odyssey, the corresponding route uses `pool "session"` and
+`pool_rollback yes`. See the Odyssey
 [global settings](https://github.com/yandex/odyssey/blob/master/docs/configuration/global.md)
 and [route settings](https://github.com/yandex/odyssey/blob/master/docs/configuration/rules.md).
-If the provider does not expose these settings, request a compatible endpoint or
-use a direct primary connection. Transaction/statement pooling is unsupported.
+The loader applies settings through SQL and restores them before closing sessions;
+it explicitly releases advisory locks. Diagnostic connections clear read-only
+mode and timeouts before returning to the pool. Managed service/loader connections
+disable asyncpg's named statement cache to avoid collisions between repeated CLI
+processes when pool cleanup is unavailable. This does not set pgbench's protocol.
 
-Before schema reset, psql checks the actual startup `search_path`, including
-schemas that do not exist yet. Two read-only pgbench connection probes check
-prepared-statement reuse. These probes run `SELECT 1`, outside the measured workload.
-Incompatible settings fail before deleting existing schemas. This checks common
-incompatibilities; it is not automatic identification of every pooler or its mode.
-No workload SQL runs until initialization and the physical replay barrier finish.
+### MDB connection limits and a validation run
+
 Allow enough server connections for the controller and preparation connection plus
 all loader workers, and later for the controller plus all pgbench clients. A pool
-smaller than the selected concurrency can serialize clients or cause timeouts.
+smaller than the selected concurrency can serialize clients, time out or reject
+connections. The utility does not change provider connection limits.
 
-The loader applies settings through SQL, so it does not depend on Odyssey
-forwarding arbitrary startup parameters. It restores its session overrides and
-explicitly releases its advisory lock. Diagnostic connections clear read-only
-mode and timeouts before returning to the pool. Correct pool cleanup is still
-required for pgbench and other clients using the same route.
+On the tested MDB cluster, a per-user limit of 50 allowed 16 clients but rejected
+the 64-client point with `too many active clients` / `pool_size ... reached 50`.
+Increase the user's **Conn limit** through the provider console/API; SQL
+`ALTER ROLE ... CONNECTION LIMIT` may be unavailable. The supplied MDB validation
+used a limit of **500** and completed the 16/64/128-client sweep with zero failed
+transactions. This is evidence for that cluster, not a universal required limit.
+
+The same validation case, with endpoint and certificate placeholders:
+
+```bash
+PGPASSFILE=/secure/benchmark.pgpass \
+PGSSLMODE=verify-full PGSSLROOTCERT=/secure/managed-ca.pem \
+pg-perf-bench benchmark \
+  --managed --host managed-primary.example --port 6432 --user user1 \
+  --database db1 --allow-database-reset --reset-mode schema \
+  --init-fsync keep --workload-profile pagila --workload-scale 30 \
+  --workload-duration-seconds 60 --pgbench-clients 16,64,128 \
+  --command-timeout 3600 --report-name mdb-pagila-s30-c16c64c128
+```
+
+Use a dedicated, pre-created `db1` with the permissions described above. Omit
+`--pgbench-prepared` for the tested simple-protocol path. Start with scale `1.15`,
+5 seconds and clients `1,2` when checking a new endpoint before the larger sweep.
 
 ## Reports and retries
 
 Every iteration keeps initialization evidence, Before/After sizes, metrics and
 raw pgbench output in JSON/HTML. Reset mode is recorded in report parameters,
-methodology and the workload execution hash. A run without instance metadata marks
+methodology and the workload execution hash. The selected protocol is recorded in
+`invocation.workload.pgbench_protocol` and also affects the execution hash.
+A run without instance metadata marks
 the managed instance identity as unknown instead of inventing hardware information.
 
 Unavailable optional SQL diagnostics, such as other database sizes or subscription
@@ -141,7 +177,7 @@ If replica count or policy intentionally differs, label the result accordingly:
 its performance effect is part of the deployment comparison.
 
 Use the same load-generator host, utility/client versions, workload sources,
-scale, duration and client counts. Save provider/Patroni topology and resource
+scale, duration, client counts and pgbench protocol. Save provider/Patroni topology and resource
 details into `managed-instance.txt` and `patroni-instance.txt`. Metadata is opaque
 report evidence; it does not configure replication. Supply metadata for both
 reports or omit it from both so their optional item structures match.
@@ -160,6 +196,8 @@ common=(
 # Optional acceleration during preparation, applied equally to both runs:
 # common+=(--init-synchronous-commit off)
 # Without it, loader synchronous_commit is unchanged (keep).
+# Both runs use simple protocol by default. If both endpoints support prepared
+# statement cleanup, opt into prepared mode equally: common+=(--pgbench-prepared)
 
 PGPASSFILE=/secure/benchmark.pgpass \
 PGSSLMODE=verify-full PGSSLROOTCERT=/secure/managed-ca.pem \

@@ -242,6 +242,11 @@ def build_parser() -> argparse.ArgumentParser:
         help='local psql executable; defaults to the version paired with pgbench',
     )
     benchmark.add_argument(
+        '--pgbench-prepared',
+        action='store_true',
+        help='run pgbench with -M prepared (default: simple query protocol)',
+    )
+    benchmark.add_argument(
         '--system-metrics-interval',
         type=positive_float,
         default=1.0,

@@ -192,7 +192,7 @@ def test_pagila_profiles_share_sources_and_declare_the_oltp_mix():
     htap = json.loads((root / 'pagila-htap/profile.json').read_text(encoding='utf-8'))
     for profile in (oltp, htap):
         command = profile['benchmark']['workload_command']
-        assert '-M prepared' in command and '--random-seed=42' in command
+        assert '-M ARG_PGBENCH_PROTOCOL' in command and '--random-seed=42' in command
         assert 'sql/01_select.sql@50' in command and 'sql/04_delete.sql@5' in command
         assert profile['files']['setup'] == ['sql/pagila-benchmark-setup.sql']
     assert 'sql/05_reporting.sql' not in oltp['benchmark']['workload_command']

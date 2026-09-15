@@ -353,8 +353,10 @@ and pgbench connection settings; legacy Pagila setup uses database/role defaults
 Generated values are reproducible; service timestamps such as Pagila's
 `last_update` use the current time.
 
-Bundled commands use `--random-seed=42`, and both Pagila variants use
-`-M prepared`. A fixed seed makes random choices repeatable with the same
+Bundled commands use `--random-seed=42` and `-M simple` by default. Add
+`--pgbench-prepared` to select `-M prepared` for Pagila, Pagila HTAP or IMDb.
+Use the same protocol in compared runs; it is recorded in the report and execution hash.
+A fixed seed makes random choices repeatable with the same
 client configuration, but a timed run can complete a different number of
 scripts; it does not guarantee identical observed mix proportions or TPS.
 These profiles use `profile.json`, independently of `pg_workload`'s
@@ -395,13 +397,15 @@ For example, append this option to the HTAP command above to change the
 reporting weight from 5 to 25, making its target share `25 / 125 = 20 %`:
 
 ```bash
---workload-command 'ARG_PGBENCH_PATH --no-vacuum --random-seed=42 -M prepared -c ARG_PGBENCH_CLIENTS -j ARG_PGBENCH_CLIENTS -T ARG_WORKLOAD_DURATION_SECONDS -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER -f ARG_WORKLOAD_PATH/sql/01_select.sql@50 -f ARG_WORKLOAD_PATH/sql/02_insert.sql@25 -f ARG_WORKLOAD_PATH/sql/03_update.sql@20 -f ARG_WORKLOAD_PATH/sql/04_delete.sql@5 -f ARG_WORKLOAD_PATH/sql/05_reporting.sql@25 ARG_PG_DATABASE'
+--workload-command 'ARG_PGBENCH_PATH --no-vacuum --random-seed=42 -M ARG_PGBENCH_PROTOCOL -c ARG_PGBENCH_CLIENTS -j ARG_PGBENCH_CLIENTS -T ARG_WORKLOAD_DURATION_SECONDS -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER -f ARG_WORKLOAD_PATH/sql/01_select.sql@50 -f ARG_WORKLOAD_PATH/sql/02_insert.sql@25 -f ARG_WORKLOAD_PATH/sql/03_update.sql@20 -f ARG_WORKLOAD_PATH/sql/04_delete.sql@5 -f ARG_WORKLOAD_PATH/sql/05_reporting.sql@25 ARG_PG_DATABASE'
 ```
 
 The replacement is a complete command: include every script you want to run.
 Use `-f FILE@WEIGHT` for relative weights; omit a file to remove it from the mix.
-Set pgbench options such as `--random-seed`, `-M` and `-j` in this command;
-there are no separate profile CLI flags for them. Retain the client and duration
+Set pgbench options such as `--random-seed` and `-j` in this command. Keep
+`-M ARG_PGBENCH_PROTOCOL` to follow `--pgbench-prepared` (default: simple).
+An explicit custom `-M prepared` remains prepared even without that CLI flag.
+Retain the client and duration
 placeholders when those values should follow the benchmark settings.
 
 ### Editing SQL or the data generator
@@ -543,10 +547,16 @@ The next run resets the profile schemas again; the final dataset remains availab
 for inspection. `DROP SCHEMA ... CASCADE` can remove dependent objects outside those
 schemas, so use a dedicated database without application dependencies.
 
-Use a direct connection or **compatible session pooling**. Odyssey requires
-`smart_search_path_enquoting=yes` and `pool_discard=yes` for pgbench; schema mode
-checks libpq startup options and prepared statements before reset. Loader overrides use SQL and are restored before returning
-connections to the pool. Transaction/statement pooling is
+Use a direct connection or **compatible session pooling**. Managed bundled
+profiles send one bare schema name through `PGOPTIONS` (for example,
+`search_path=pagila`), so Odyssey does not need `smart_search_path_enquoting`
+for these profiles. The default simple protocol also avoids the need for prepared
+statement cleanup. With `--pgbench-prepared`, Odyssey needs `pool_discard=yes`
+or equivalent cleanup. Schema mode verifies the startup path and, when selected,
+prepared statements before reset. Loader overrides use SQL and are restored
+before returning connections to the pool. Check the provider's per-user connection
+limit before large client sweeps; allow headroom beyond the pgbench client count.
+Transaction/statement pooling is
 not supported by the session lock and loader settings. Replica statistics and
 WAL-function permissions are checked before reset; directly connected physical
 replicas must replay the preparation WAL before pgbench starts. Missing monitoring

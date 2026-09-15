@@ -33,3 +33,6 @@ Example selection (connection and safety arguments omitted):
 
 Use a dedicated disposable database. The benchmark resets the database or profile schemas before every point in the
 client sweep, so every point receives the same generated data and indexes.
+
+The default query protocol is simple. Add `--pgbench-prepared` for prepared
+statements, and use the same setting on both sides of a comparison.

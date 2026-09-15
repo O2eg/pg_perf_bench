@@ -152,6 +152,7 @@ def test_managed_run_only_uses_database_and_workload_clients(tmp_path):
     db.execute = AsyncMock()
     db.fetchval = AsyncMock(return_value='PostgreSQL 18.4')
     db.fetch = AsyncMock(return_value=[])
+    connect = AsyncMock(return_value=db)
     pgbench_output = (
         'number of clients: 1\nduration: 2 s\n'
         'number of transactions actually processed: 100\n'
@@ -191,7 +192,7 @@ def test_managed_run_only_uses_database_and_workload_clients(tmp_path):
                 'pg_perf_bench.report.commands.run_shell_command',
                 side_effect=AssertionError('host facts'),
             ),
-            patch('pg_perf_bench.benchmark.asyncpg.connect', AsyncMock(return_value=db)),
+            patch('pg_perf_bench.benchmark.asyncpg.connect', connect),
             patch.object(
                 BenchmarkRunner,
                 'collect_compatibility_evidence',
@@ -209,6 +210,7 @@ def test_managed_run_only_uses_database_and_workload_clients(tmp_path):
     for method in ('check_db_access', 'drop_db', 'init_db', 'check_user_db_access'):
         assert getattr(tasks, method).await_count == 2
     assert db.fetchval.await_count > 0 and db.fetch.await_count > 0
+    assert all(call.kwargs['statement_cache_size'] == 0 for call in connect.await_args_list)
     assert len(report['benchmark_runs']) == 2
     assert db.execute.await_count == 2
     assert len(report['sections']['storage']['reports']) == 12

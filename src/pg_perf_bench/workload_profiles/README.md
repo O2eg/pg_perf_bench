@@ -8,7 +8,8 @@ client sweep, database reset and evidence collection itself.
 
 List installed profiles with `pg-perf-bench profiles`. `imdb` is the complete 21-table,
 38-script analytical workload shared with `pg_workload/imdb`; `pagila` is a pure OLTP mix with
-fixed script weights and prepared statements; `pagila-htap` adds a 5 % reporting script to it. Select one with
+fixed script weights; `pagila-htap` adds a 5 % reporting script to it. All profiles
+use simple protocol by default; add `--pgbench-prepared` for prepared statements. Select one with
 `pg-perf-bench benchmark --workload-profile imdb ...` or `pagila`. The profile supplies
 the common load plan and legacy initialization/workload command templates;
 `--workload-scale` controls data

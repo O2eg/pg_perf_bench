@@ -364,9 +364,10 @@ class BenchmarkRunner:
         initialization_options: LoadOptions | None = None,
         required_replicas=None,
         initialization_settings=None,
+        managed: bool = False,
     ) -> dict[str, Any]:
         init_cmd, workload_cmd = load_iteration
-        environment = workload_environment(db_conf, initialization_plan)
+        environment = workload_environment(db_conf, initialization_plan, managed=managed)
         password = db_conf.get('password')
         secrets = (str(password) if password else None,)
         initialization = None
@@ -547,6 +548,7 @@ class BenchmarkRunner:
                 'duration_seconds': workload_conf.get('workload_duration_seconds'),
                 'iteration_parameter': workload_conf.get('pgbench_iter_name'),
                 'iteration_values': list(workload_conf.get('pgbench_iter_list') or []),
+                'pgbench_protocol': workload_conf.get('pgbench_protocol', 'simple'),
             },
             'metrics': {
                 'engine': None if managed else 'pg_diag',
@@ -606,6 +608,11 @@ class BenchmarkRunner:
             )
             initialization_options = LoadOptions.from_config(workload_conf)
         schema_reset = workload_conf.get('reset_mode') == 'schema'
+        managed = bool(
+            workload_conf.get('managed')
+            or workload_conf.get('managed_pg_info')
+            or conn_type == ConnectionType.MANAGED
+        )
         if schema_reset:
             if initialization_plan is None or initialization_options.fsync != 'keep':
                 raise ConfigurationError(
@@ -618,6 +625,8 @@ class BenchmarkRunner:
                 psql_path=workload_conf.get('psql_path') or 'psql',
                 pgbench_path=workload_conf.get('pgbench_path') or 'pgbench',
                 timeout=initialization_options.timeout,
+                managed=managed,
+                pgbench_protocol=workload_conf.get('pgbench_protocol', 'simple'),
             )
         logger.info('Starting load iterations...')
         for idx, load_iteration in enumerate(load_iterations, start=1):
@@ -673,6 +682,7 @@ class BenchmarkRunner:
                         initialization_options=initialization_options,
                         required_replicas=required_replicas,
                         initialization_settings=preflight,
+                        managed=managed,
                     )
                 )
             finally:
@@ -750,6 +760,10 @@ class BenchmarkRunner:
                 workload_conf.get('managed') or managed_path or conn_type == ConnectionType.MANAGED
             )
             if managed:
+                # Session poolers may retain asyncpg's named statement cache after
+                # disconnect. Names repeat in the next CLI process; unnamed SQL
+                # avoids collisions without requiring provider-side DISCARD ALL.
+                db_conf = {**db_conf, 'statement_cache_size': 0}
                 mark_managed_report_unavailable(report)
             if managed_path:
                 add_managed_report_metadata(report, read_managed_pg_info(managed_path))

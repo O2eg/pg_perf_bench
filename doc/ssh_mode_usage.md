@@ -27,7 +27,7 @@ ssh-keyscan -H db-host.example >> ~/.ssh/known_hosts
 ```
 
 Install the public key for the account selected by `--ssh-user`. For benchmark
-mode without Patroni that account must be able to run `pg_ctl` for the selected
+database reset without Patroni that account must be able to run `pg_ctl` for the selected
 cluster; using the PostgreSQL service owner is the simplest model.
 
 The key may be referenced directly with `--ssh-key`, or loaded into an
@@ -108,7 +108,46 @@ PGPASSWORD=secret pg-perf-bench benchmark \
   --report-name ssh-pg18
 ```
 
-[Patroni is detected automatically](../README.md#patroni). The SSH account must
+## Fast loading in an existing database
+
+The command above uses legacy `pgbench -i` initialization. Schema reset requires
+an initialization profile with a common LoadPlan; adding only `--reset-mode schema`
+to that command will fail. Pre-create a dedicated `pg_perf_bench_test` database,
+ensure the SQL role has CREATE/schema ownership and replication-monitoring rights,
+and use a bundled profile instead:
+
+```bash
+PGPASSWORD=secret pg-perf-bench benchmark \
+  --connection-type ssh --ssh-host db-host.example --ssh-user postgres \
+  --ssh-key ~/.ssh/pg_perf_bench --ssh-known-hosts ~/.ssh/known_hosts \
+  --remote-pg-host 127.0.0.1 --remote-pg-port 5432 \
+  --host 127.0.0.1 --port 55432 --user postgres \
+  --pg-data-path /var/lib/postgresql/18/main \
+  --pg-bin-path /usr/lib/postgresql/18/bin \
+  --database pg_perf_bench_test --allow-database-reset --reset-mode schema \
+  --workload-profile pagila --workload-scale 1.15 --init-mode fast \
+  --init-fsync keep --init-workers 4 --init-batch-rows 100000 \
+  --workload-duration-seconds 5 --pgbench-clients 1,2 \
+  --command-timeout 300 --report-name ssh-pagila-schema
+```
+
+This loads in batches, converts UNLOGGED tables to LOGGED, builds indexes in
+parallel and waits for direct physical replicas to replay preparation WAL.
+The database and server are not restarted. Server paths remain required for this
+transport's evidence collection. Use `--reset-mode database` for a database
+recreation/restart run; that mode also requires CREATEDB and access to `postgres`.
+
+The default protocol is simple. Add `--pgbench-prepared` to this profile command
+for prepared statements. `--init-synchronous-commit keep` is the default; add
+`--init-synchronous-commit off` only when deliberately skipping acknowledgement
+waits during loading. The workload's commit policy and the replay barrier remain
+unchanged. For larger runs, increase scale, duration, clients and timeout together.
+For SQL-only comparisons with managed PostgreSQL, follow the
+[paired managed/Patroni example](managed_mode_usage.md#compare-managed-postgresql-and-patroni).
+
+## Configuration and lifecycle
+
+[Patroni is detected automatically](../README.md#patroni) in database reset mode. The SSH account must
 be able to read its process environment and configuration. API requests execute
 on the remote host using Patroni's configured authentication and TLS settings.
 With Patroni, `--pg-custom-config` and `--drop-os-caches` are rejected before changes.

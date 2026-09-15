@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -16,6 +17,7 @@ import docker
 import pytest
 
 from pg_perf_bench.benchmark import BenchmarkRunner
+from pg_perf_bench.const import WORKLOAD_PROFILES_PATH
 from pg_perf_bench.errors import ConfigurationError
 from pg_perf_bench.initialization import LoadOptions, LoadPlan, LoadTask, prepare_database
 from pg_perf_bench.initialization_settings import (
@@ -105,10 +107,15 @@ database "benchdb" {{ user "bench_owner" {{
 
 
 @pytest.mark.parametrize(
-    ('smart', 'discard', 'message'),
-    [('no', 'yes', 'smart_search_path_enquoting=yes'), ('yes', 'no', 'pool_discard=yes')],
+    ('smart', 'discard', 'schemas', 'protocol', 'message'),
+    [
+        ('no', 'yes', ('pagila', 'other'), 'simple', 'smart_search_path_enquoting=yes'),
+        ('no', 'no', ('pagila',), 'prepared', 'pool_discard=yes'),
+    ],
 )
-def test_incompatible_pool_rejected_before_schema_reset(tmp_path, smart, discard, message):
+def test_incompatible_pool_rejected_before_schema_reset(
+    tmp_path, smart, discard, schemas, protocol, message
+):
     with postgres(18) as (primary, conf):
         limited = asyncio.run(restrict_server(conf))
         with odyssey(primary, limited, tmp_path, smart=smart, discard=discard) as remote:
@@ -122,7 +129,7 @@ def test_incompatible_pool_rejected_before_schema_reset(tmp_path, smart, discard
                     original = await db.fetchval("SELECT 'pagila.keep_me'::regclass::oid")
                     with patch(
                         'pg_perf_bench.benchmark.load_plan',
-                        return_value=LoadPlan(('pagila',), '', (), ()),
+                        return_value=LoadPlan(schemas, '', (), ()),
                     ):
                         with pytest.raises(ConfigurationError, match=message):
                             await BenchmarkRunner.run_benchmark_iterations(
@@ -138,6 +145,7 @@ def test_incompatible_pool_rejected_before_schema_reset(tmp_path, smart, discard
                                     'reset_mode': 'schema',
                                     'init_fsync': 'keep',
                                     'allow_database_reset': True,
+                                    'pgbench_protocol': protocol,
                                 },
                             )
                     assert await db.fetchval("SELECT 'pagila.keep_me'::regclass::oid") == original
@@ -298,13 +306,34 @@ def test_advisory_lock_released_before_return_to_pool(tmp_path, ending):
 
 
 @pytest.mark.parametrize(
-    ('profile', 'scale'), [('pagila', '1.15'), ('pagila-htap', '1.15'), ('imdb', '0.03')]
+    ('profile', 'scale', 'protocol', 'wrapper'),
+    [
+        (profile, scale, protocol, None)
+        for profile, scale in [('pagila', '1.15'), ('pagila-htap', '1.15'), ('imdb', '0.03')]
+        for protocol in ('simple', 'prepared')
+    ]
+    + [('pagila', '1.15', 'prepared', 'literal'), ('pagila', '1.15', 'prepared', 'placeholder')],
 )
-def test_full_cli_repeated_through_session_pool(tmp_path, profile, scale):
+def test_full_cli_repeated_through_session_pool(tmp_path, profile, scale, protocol, wrapper):
+    flags = ['--pgbench-prepared'] if protocol == 'prepared' and wrapper != 'literal' else []
+    if wrapper:
+        manifest = json.loads((WORKLOAD_PROFILES_PATH / profile / 'profile.json').read_text())
+        command = manifest['benchmark']['workload_command']
+        if wrapper == 'literal':
+            command = command.replace('ARG_PGBENCH_PROTOCOL', 'prepared')
+        flags += ['--workload-command', 'bash -c ' + shlex.quote(command)]
     with postgres(18) as (primary, conf):
         limited = asyncio.run(restrict_server(conf))
         original = asyncio.run(identity(conf))
-        with odyssey(primary, limited, tmp_path, discard='yes') as remote:
+        # MDB's old search_path handling, without prepared-statement cleanup for
+        # the default simple protocol. Prepared mode explicitly needs cleanup.
+        with odyssey(
+            primary,
+            limited,
+            tmp_path,
+            smart='no',
+            discard='yes' if protocol == 'prepared' else 'no',
+        ) as remote:
             for attempt, policy in enumerate(('keep', 'off')):
                 name = f'{profile}-{attempt}'
                 result = subprocess.run(
@@ -313,6 +342,7 @@ def test_full_cli_repeated_through_session_pool(tmp_path, profile, scale):
                         '-m',
                         'pg_perf_bench',
                         'benchmark',
+                        *flags,
                         '--managed',
                         '--host',
                         remote['host'],
@@ -354,11 +384,14 @@ def test_full_cli_repeated_through_session_pool(tmp_path, profile, scale):
                 (tmp_path / f'{name}.log').write_text(result.stdout + result.stderr)
                 assert result.returncode in (0, 5), result.stdout + result.stderr
                 report = json.loads((tmp_path / f'{name}.json').read_text())
+                assert report['invocation']['workload']['pgbench_protocol'] == protocol
                 assert len(report['benchmark_runs']) == 2
                 for run in report['benchmark_runs']:
                     assert run['metrics']['tps'] > 0
                     assert run['metrics']['failed_transactions_percent'] == 0
                     assert run['initialization']['fsync_after'] == 'on'
+                    assert f'-M {protocol}' in run['workload']['command']
+                    assert f'query mode: {protocol}' in run['workload']['stdout']
                 assert asyncio.run(identity(conf)) == original
         logs = primary.logs().decode()
         assert 'bench_owner@postgres' not in logs

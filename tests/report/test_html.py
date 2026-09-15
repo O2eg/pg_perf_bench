@@ -24,6 +24,7 @@ def sample_report() -> dict:
             },
             'workload': {
                 'profile': 'pagila',
+                'pgbench_protocol': 'simple',
                 'scale': 0.1,
                 'duration_seconds': 30,
                 'iteration_parameter': 'pgbench_clients',

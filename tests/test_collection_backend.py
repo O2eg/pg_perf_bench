@@ -1,12 +1,15 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from pg_perf_bench.collect_info import InfoCollector
 from pg_perf_bench.const import DB_INFO_TEMPLATE_JSON_PATH
 from pg_perf_bench.db_operations import collect_db_logs
 
 
-def test_database_collection_only_opens_read_only_connection():
+@pytest.mark.parametrize('conn_type', ['local', 'managed'])
+def test_database_collection_only_opens_read_only_connection(conn_type):
     client = MagicMock()
     client.send_pg_config_file = AsyncMock()
     connection = MagicMock()
@@ -33,7 +36,7 @@ def test_database_collection_only_opens_read_only_connection():
         ):
             result = await InfoCollector.handle_db_info(
                 client,
-                'local',
+                conn_type,
                 db_conf,
                 MagicMock(),
             )
@@ -44,6 +47,10 @@ def test_database_collection_only_opens_read_only_connection():
     kwargs = connect.await_args.kwargs
     assert kwargs['server_settings']['default_transaction_read_only'] == 'on'
     assert kwargs['server_settings']['statement_timeout'] == '10000'
+    if conn_type == 'managed':
+        assert kwargs['statement_cache_size'] == 0
+    else:
+        assert 'statement_cache_size' not in kwargs
 
 
 def test_collect_info_closes_database_connection_when_collection_fails():

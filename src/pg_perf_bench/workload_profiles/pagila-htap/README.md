@@ -11,7 +11,7 @@ contention, planner and CPU pressure, and the effect of `work_mem`, parallel que
 Schema, generator, common-loader assets, setup script and the four OLTP scripts are byte-identical copies of the
 `pagila` profile (a unit test enforces this); only the manifest and the reporting script
 differ. Weights: `01_select` 50, `02_insert` 25, `03_update` 20, `04_delete` 5,
-`05_reporting` 5. Everything said about scale, determinism, prepared mode and
+`05_reporting` 5. Everything said about scale, determinism, simple/prepared protocol selection and
 `--random-seed=42` in the `pagila` README applies here.
 
 Example selection (connection and safety arguments omitted):

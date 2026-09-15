@@ -2127,6 +2127,7 @@
         ['db_user', database.user],
         ['profile', profile],
         ['scale', workload.scale],
+        ['pgbench_protocol', workload.pgbench_protocol],
         [iterationParameter, iterationValues.length ? iterationValues.join(',') : null],
         ['duration', duration == null ? null : `${duration}s`],
         ['metrics', metrics.engine || report.benchmark_methodology?.system_metrics_engine],

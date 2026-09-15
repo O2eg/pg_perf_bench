@@ -39,6 +39,7 @@ to find maximum TPS for one fixed dataset, query mix and environment.
 | `ARG_PG_PASSWORD` | `--password` or `PGPASSWORD` |
 | `ARG_PG_DATABASE` | `--database` |
 | `ARG_PGBENCH_PATH` | newest installed local pgbench, or validated `--pgbench-path` |
+| `ARG_PGBENCH_PROTOCOL` | `simple` by default; `prepared` with `--pgbench-prepared` |
 | `ARG_PSQL_PATH` | same-major local psql, or validated `--psql-path` |
 | `ARG_WORKLOAD_PATH` | `--workload-path` |
 | `ARG_WORKLOAD_SCALE` | `--workload-scale` |
@@ -98,6 +99,41 @@ pg-perf-bench benchmark \
 The profiles do not use or copy `pg_workload`'s `profile.yml`. That file
 describes continuous scheduling in `pg_workload`; `pg_perf_bench` instead
 resets the dataset for each concurrency point and measures maximum TPS.
+
+## pgbench protocol
+
+All bundled profiles use `-M ARG_PGBENCH_PROTOCOL`: simple by default,
+prepared with `--pgbench-prepared`. Keep the same protocol in paired comparisons;
+it affects parsing/planning costs and is included in the execution hash and report
+parameters (`invocation.workload.pgbench_protocol`). Changing only the protocol
+changes the execution hash while retaining the workload definition hash.
+
+Custom commands keep their explicit `-M` / `--protocol` option. To make the CLI
+flag control a custom command, include `-M ARG_PGBENCH_PROTOCOL`. An explicit
+`-M prepared` is recognized even without the flag, including for the schema-reset
+preflight. The flag fails early if the custom command would still use another
+protocol. See [managed connection pooling](managed_mode_usage.md#connection-pooling)
+for prepared-statement cleanup requirements.
+
+Literal options inside `sh -c` / `bash -c` wrappers are also recognized. For example,
+replace a profile's workload command with the following (all queries here are
+read-only, so this measures a different workload from the default mixed profile):
+
+```bash
+--workload-command "bash -c 'ARG_PGBENCH_PATH -n -M ARG_PGBENCH_PROTOCOL -T ARG_WORKLOAD_DURATION_SECONDS -c ARG_PGBENCH_CLIENTS -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER -f ARG_WORKLOAD_PATH/sql/01_select.sql ARG_PG_DATABASE'"
+```
+
+Add `--pgbench-prepared` to select prepared mode even inside the wrapper. Literal
+`-M prepared` needs no flag. Adjacent commands such as `echo` do not determine the
+pgbench protocol. Multiple detected pgbench commands must agree on the protocol.
+
+The utility does not execute scripts or evaluate shell variables to discover their
+protocol. An opaque command such as `run-bench.sh`, or a dynamic `-M "$MODE"`, is
+recorded as `unknown` and retains the prepared-statement preflight in schema mode.
+A script that accepts a protocol argument can declare it by accepting
+`ARG_PGBENCH_PROTOCOL`, for example `run-bench.sh ARG_PGBENCH_PROTOCOL`. Such a script
+must pass that value to pgbench. Use literal options or this placeholder when
+comparing reports with a known protocol.
 
 ## Command timeout
 

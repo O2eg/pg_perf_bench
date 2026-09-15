@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import shlex
 import stat
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,6 +25,71 @@ from pg_perf_bench.workloads import load_workload_profile
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 5.0
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 300.0
 PROTECTED_DATABASES = frozenset({'postgres', 'template0', 'template1'})
+
+
+def pgbench_protocol(command: str, *, prepared: bool) -> str:
+    """Resolve literal pgbench options, including commands inside sh/bash -c."""
+    selected = 'prepared' if prepared else 'simple'
+    protocols = _pgbench_protocols(command.replace('ARG_PGBENCH_PROTOCOL', selected))
+    if len(set(protocols)) > 1:
+        raise ConfigurationError('All pgbench commands in a workload must use the same protocol')
+    protocol = protocols[0] if protocols else 'unknown'
+    if protocol == 'unknown' and 'ARG_PGBENCH_PROTOCOL' in command:
+        # An opaque script can accept the explicit protocol as its own argument.
+        protocol = selected
+    if prepared and protocol != 'prepared':
+        raise ConfigurationError(
+            '--pgbench-prepared requires -M ARG_PGBENCH_PROTOCOL '
+            '(or -M prepared) in the custom workload command'
+        )
+    return protocol
+
+
+def _pgbench_protocols(command: str) -> list[str]:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|()\n')
+    lexer.whitespace = ' \t\r'
+    lexer.whitespace_split = True
+    segments: list[list[str]] = [[]]
+    for token in lexer:
+        if token and all(char in ';&|()\n' for char in token):
+            segments.append([])
+        else:
+            segments[-1].append(token)
+    protocols = []
+    for tokens in segments:
+        # Common executable prefixes; other shell programs remain opaque.
+        while tokens and (tokens[0] in ('env', 'exec') or '=' in tokens[0]):
+            tokens = tokens[1:]
+        if not tokens:
+            continue
+        executable = Path(tokens[0]).name
+        if executable in ('sh', 'bash', 'dash', 'ksh', 'zsh'):
+            for index, token in enumerate(tokens[1:], start=1):
+                if token.startswith('-') and not token.startswith('--') and 'c' in token[1:]:
+                    if index + 1 < len(tokens):
+                        protocols.extend(_pgbench_protocols(tokens[index + 1]))
+                    break
+            continue
+        if executable not in ('pgbench', 'ARG_PGBENCH_PATH'):
+            continue
+        protocol = 'simple'
+        for index, token in enumerate(tokens[1:], start=1):
+            if token == '--':
+                break
+            if token in ('-M', '--protocol'):
+                protocol = tokens[index + 1] if index + 1 < len(tokens) else ''
+            elif token.startswith('--protocol='):
+                protocol = token.partition('=')[2]
+            elif token.startswith('-M'):
+                protocol = token[2:]
+        if '$' in protocol or '`' in protocol:
+            protocol = 'unknown'
+        elif protocol not in ('simple', 'extended', 'prepared'):
+            raise ConfigurationError(
+                'Workload pgbench protocol must be simple, extended or prepared'
+            )
+        protocols.append(protocol)
+    return protocols
 
 
 def resolve_ssh_agent_socket() -> Path:
@@ -203,6 +269,7 @@ class WorkloadConfig:
     init_table_mode: str = 'unlogged'
     init_fsync: str = 'off'
     init_synchronous_commit: str = 'keep'
+    pgbench_protocol: str = 'simple'
 
     def as_legacy_dict(self, host: HostConfig) -> dict[str, Any]:
         return {
@@ -234,6 +301,7 @@ class WorkloadConfig:
             'init_table_mode': self.init_table_mode,
             'init_fsync': self.init_fsync,
             'init_synchronous_commit': self.init_synchronous_commit,
+            'pgbench_protocol': self.pgbench_protocol,
         }
 
 
@@ -456,6 +524,13 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
             values.get('pgbench_path'),
             values.get('psql_path'),
         )
+        workload_command = str(
+            _required(
+                values.get('workload_command')
+                or (profile['benchmark']['workload_command'] if profile is not None else None),
+                '--workload-command',
+            )
+        )
         workload = WorkloadConfig(
             benchmark_type=benchmark_type,
             init_command=str(init_command or ''),
@@ -468,13 +543,10 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
             init_table_mode=values.get('init_table_mode', 'unlogged'),
             init_fsync=values.get('init_fsync', 'off'),
             init_synchronous_commit=values.get('init_synchronous_commit', 'keep'),
-            workload_command=str(
-                _required(
-                    values.get('workload_command')
-                    or (profile['benchmark']['workload_command'] if profile is not None else None),
-                    '--workload-command',
-                )
+            pgbench_protocol=pgbench_protocol(
+                workload_command, prepared=bool(values.get('pgbench_prepared'))
             ),
+            workload_command=workload_command,
             pgbench_path=str(pgbench.path),
             psql_path=str(psql.path),
             iteration_name='pgbench_clients' if clients else 'pgbench_time',

@@ -65,11 +65,18 @@ verified the same way. Both settings are restored before returning connections t
 a session pool, including after errors and cancellation. Advisory locks are
 explicitly released. Diagnostic sessions reset their read-only mode and timeouts
 before returning to the pool. pgbench receives `search_path` through its child
-`PGOPTIONS`, preserving other caller options. In schema mode, a read-only psql
-probe checks the same libpq options before any schema reset; read-only pgbench
-probes also check prepared-statement cleanup. Incompatible pools are rejected
+`PGOPTIONS`, preserving other caller options. Managed runs omit `public` and
+send a single bare profile schema for the bundled profiles, which works with
+Odyssey's older startup-option handling. In schema mode, a read-only psql probe
+checks the same libpq options before any schema reset. The default pgbench
+protocol is simple; prepared-statement probes run with `--pgbench-prepared`,
+an explicit prepared custom command, or an opaque script whose protocol is
+`unknown`. See [custom protocol declarations](doc/workload_description.md#pgbench-protocol).
+Incompatible pools are rejected
 with a configuration error before the existing dataset is removed. Bundled fast
 profiles do not change database/role search_path.
+Managed service and loader connections disable asyncpg's named statement cache,
+so repeated CLI runs do not leave colliding statement names in session pools.
 The workload does not inherit the loader's temporary synchronous_commit value.
 Legacy Pagila initialization retains its existing persistent search_path setup
 and requires database reset; arbitrary legacy commands do not support schema reset.

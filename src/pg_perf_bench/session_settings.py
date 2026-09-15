@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from pg_perf_bench.errors import ConfigurationError
 from pg_perf_bench.executors.process import run_local_process
-from pg_perf_bench.initialization import profile_search_path
+from pg_perf_bench.initialization import profile_search_path, quote_identifier
 
 
 async def close_diagnostic_connection(db):
@@ -35,7 +36,7 @@ async def close_diagnostic_connection(db):
         raise
 
 
-def workload_environment(db_conf, plan=None):
+def workload_environment(db_conf, plan=None, *, managed=False):
     environment = os.environ.copy()
     for name, key in (
         ('PGHOST', 'host'),
@@ -47,8 +48,21 @@ def workload_environment(db_conf, plan=None):
     if db_conf.get('password'):
         environment['PGPASSWORD'] = str(db_conf['password'])
     if plan is not None:
+        if managed:
+            # Managed endpoints behind session poolers (Odyssey) rewrite quoted
+            # or multi-schema search_path startup options; a single bare schema
+            # name survives. Workload scripts resolve pg_catalog implicitly and
+            # do not need public, so the profile schema alone is sufficient.
+            # Preserve case and punctuation for custom schemas. Such names (and
+            # multiple schemas) still need a pooler that preserves the full list;
+            # the preflight below rejects a rewritten value before schema reset.
+            path = ','.join(
+                schema if re.fullmatch(r'[a-z_][a-z0-9_$]*', schema) else quote_identifier(schema)
+                for schema in plan.schemas
+            )
+        else:
+            path = profile_search_path(plan)
         # PGOPTIONS uses PostgreSQL option escaping, not shell quoting.
-        path = profile_search_path(plan)
         escaped = ''.join('\\' + c if c.isspace() or c == '\\' else c for c in path)
         environment['PGOPTIONS'] = (
             environment.get('PGOPTIONS', '') + ' -c search_path=' + escaped
@@ -56,11 +70,22 @@ def workload_environment(db_conf, plan=None):
     return environment
 
 
-async def check_workload_session(db_conf, plan, *, psql_path, pgbench_path, timeout):
-    """Probe libpq startup options before resetting a pre-created database.
+async def check_workload_session(
+    db_conf,
+    plan,
+    *,
+    psql_path,
+    pgbench_path,
+    timeout,
+    managed=False,
+    pgbench_protocol='simple',
+):
+    """Probe libpq session behavior before resetting a pre-created database.
 
     Unlike asyncpg, pgbench cannot run session setup SQL outside its workload.
-    psql uses the same libpq environment and must resolve the requested schema list.
+    The schema list travels in libpq startup options; psql uses the same
+    environment and must resolve it. Managed mode sends the bare profile
+    schema without public; a single bare name survives Odyssey's older handling.
     parse_ident handles both quoted identifiers and pooler-normalized spellings,
     even when profile schemas do not exist yet.
     """
@@ -71,9 +96,10 @@ FROM pg_catalog.regexp_matches(
     '("(?:[^"]|"")*"|[^,[:space:]]+)[[:space:]]*(,|$)', 'g'
 ) AS m;
 """
+    environment = workload_environment(db_conf, plan, managed=managed)
     result = await run_local_process(
         [psql_path, '-X', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-c', sql],
-        env=workload_environment(db_conf, plan),
+        env=environment,
         timeout=timeout,
         secrets=(db_conf.get('password'),),
     )
@@ -81,7 +107,7 @@ FROM pg_catalog.regexp_matches(
         actual = json.loads(result.stdout)
     except ValueError as exc:
         raise ConfigurationError('Cannot verify workload search_path before reset') from exc
-    expected = [*plan.schemas, 'public']
+    expected = list(plan.schemas) if managed else [*plan.schemas, 'public']
     if actual != expected:
         raise ConfigurationError(
             f'Workload connection search_path was rewritten: expected {expected!r}, '
@@ -89,6 +115,12 @@ FROM pg_catalog.regexp_matches(
             'smart_search_path_enquoting=yes or use a direct primary endpoint. '
             'Session pooling must preserve libpq search_path startup options.'
         )
+    if pgbench_protocol in ('simple', 'extended'):
+        # The simple query protocol leaves no server-side prepared statements,
+        # so session pooling does not need pool_discard for this workload.
+        return
+    # Opaque workload scripts cannot be assumed to use simple protocol. Keep the
+    # prepared-statement check unless their command declares a protocol explicitly.
     # pgbench reuses fixed prepared-statement names across processes. A session
     # pool must clean them on disconnect, including between client-count points.
     with TemporaryDirectory(prefix='pg-perf-session-') as directory:
@@ -97,7 +129,7 @@ FROM pg_catalog.regexp_matches(
         for _ in range(2):
             probe = await run_local_process(
                 [pgbench_path, '-n', '-M', 'prepared', '-c', '1', '-t', '1', '-f', str(script)],
-                env={**workload_environment(db_conf, plan), 'LC_ALL': 'C'},
+                env={**environment, 'LC_ALL': 'C'},
                 timeout=timeout,
                 check=False,
                 secrets=(db_conf.get('password'),),

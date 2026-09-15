@@ -8,6 +8,7 @@ import asyncpg
 from pg_perf_bench import __version__
 from pg_perf_bench.connections.common import get_connection
 from pg_perf_bench.const import (
+    ConnectionType,
     WorkMode,
     get_datetime_report,
     get_default_report_name,
@@ -63,6 +64,8 @@ class InfoCollector:
         if db_conn_params and isinstance(db_conn_params, dict):
             try:
                 connection_params = dict(db_conn_params)
+                if _conn_type == ConnectionType.MANAGED:
+                    connection_params['statement_cache_size'] = 0
                 connection_params['server_settings'] = {
                     'default_transaction_read_only': 'on',
                     'statement_timeout': '10000',

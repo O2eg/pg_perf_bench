@@ -374,6 +374,7 @@ def build_workload_evidence(
     ]
     pgbench = {
         'pgbench_path': workload_conf.get('pgbench_path'),
+        'pgbench_protocol': workload_conf.get('pgbench_protocol', 'simple'),
         'psql_path': workload_conf.get('psql_path'),
         'iteration_parameter': workload_conf.get('pgbench_iter_name'),
         'iteration_values': list(workload_conf.get('pgbench_iter_list') or []),
@@ -399,6 +400,7 @@ def build_workload_evidence(
         {
             'definition_hash': definition_hash,
             'pgbench_path': pgbench['pgbench_path'],
+            'pgbench_protocol': pgbench['pgbench_protocol'],
             'psql_path': pgbench['psql_path'],
             'iteration_parameter': pgbench['iteration_parameter'],
             'iteration_values': pgbench['iteration_values'],

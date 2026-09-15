@@ -2,7 +2,7 @@
   "schema_version": "pg_perf_bench/workload-profile-v1",
   "id": "pagila",
   "title": "Synthetic Pagila OLTP",
-  "description": "Pure OLTP: short read/write transactions by key over a deterministic DVD-rental schema; pgbench-side random identifiers, prepared statements, 50/25/20/5 select/insert/update/delete mix.",
+  "description": "Pure OLTP: short read/write transactions by key over a deterministic DVD-rental schema; pgbench-side random identifiers, selectable simple/prepared protocol, 50/25/20/5 select/insert/update/delete mix.",
   "requires_write": true,
   "default_scale": 1.0,
   "files": {
@@ -31,7 +31,7 @@
   "benchmark": {
     "default_duration_seconds": 60,
     "init_command": "ARG_PSQL_PATH -X -v ON_ERROR_STOP=1 -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER -d ARG_PG_DATABASE -f ARG_WORKLOAD_PATH/sql/pagila-schema.sql && ARG_PYTHON_PATH ARG_WORKLOAD_PATH/generator.py --scale ARG_WORKLOAD_SCALE && ARG_PSQL_PATH -X -v ON_ERROR_STOP=1 -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER -d ARG_PG_DATABASE -f ARG_WORKLOAD_PATH/sql/pagila-benchmark-setup.sql",
-    "workload_command": "ARG_PGBENCH_PATH --no-vacuum --random-seed=42 -M prepared --client=ARG_PGBENCH_CLIENTS --jobs=ARG_PGBENCH_CLIENTS --time=ARG_WORKLOAD_DURATION_SECONDS --progress=10 -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER -f ARG_WORKLOAD_PATH/sql/01_select.sql@50 -f ARG_WORKLOAD_PATH/sql/02_insert.sql@25 -f ARG_WORKLOAD_PATH/sql/03_update.sql@20 -f ARG_WORKLOAD_PATH/sql/04_delete.sql@5 ARG_PG_DATABASE"
+    "workload_command": "ARG_PGBENCH_PATH --no-vacuum --random-seed=42 -M ARG_PGBENCH_PROTOCOL --client=ARG_PGBENCH_CLIENTS --jobs=ARG_PGBENCH_CLIENTS --time=ARG_WORKLOAD_DURATION_SECONDS --progress=10 -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER -f ARG_WORKLOAD_PATH/sql/01_select.sql@50 -f ARG_WORKLOAD_PATH/sql/02_insert.sql@25 -f ARG_WORKLOAD_PATH/sql/03_update.sql@20 -f ARG_WORKLOAD_PATH/sql/04_delete.sql@5 ARG_PG_DATABASE"
   },
   "initialization": {
     "schema_version": "pg_perf_bench/load-plan-v1",
