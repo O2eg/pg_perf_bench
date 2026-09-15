@@ -13,7 +13,7 @@ uses AsyncSSH and native local port forwarding; `sshtunnel` and server-side
 | `pgbench` and `psql` | local workload-generator host |
 | Host fact collectors | remote host |
 | Timed `pg_diag` OS sampler | remote host |
-| `pg_ctl` lifecycle | remote host as `--ssh-user` |
+| PostgreSQL lifecycle | remote Patroni API when detected; otherwise `pg_ctl` as `--ssh-user` |
 | Filesystem sync and optional cache drop | remote host |
 
 ## SSH setup
@@ -27,8 +27,8 @@ ssh-keyscan -H db-host.example >> ~/.ssh/known_hosts
 ```
 
 Install the public key for the account selected by `--ssh-user`. For benchmark
-mode that account must be able to run `pg_ctl` for the selected cluster; using
-the PostgreSQL service owner is the simplest model.
+mode without Patroni that account must be able to run `pg_ctl` for the selected
+cluster; using the PostgreSQL service owner is the simplest model.
 
 The key may be referenced directly with `--ssh-key`, or loaded into an
 already-running local agent and selected with `--ssh-agent`:
@@ -108,8 +108,17 @@ PGPASSWORD=secret pg-perf-bench benchmark \
   --report-name ssh-pg18
 ```
 
-`--pg-custom-config` names a local source file. It is uploaded and atomically
-renamed to the remote cluster's `postgresql.conf` before the reset sequence.
+[Patroni is detected automatically](../README.md#patroni). The SSH account must
+be able to read its process environment and configuration. API requests execute
+on the remote host using Patroni's configured authentication and TLS settings.
+With Patroni, `--pg-custom-config` and `--drop-os-caches` are rejected before changes.
+
+The remote discovery interpreter and Patroni's Python environment must be Python
+3.10 or newer. The local client's Python version does not satisfy this remote
+requirement. See the linked Patroni section for mTLS client settings.
+
+Without Patroni, `--pg-custom-config` names a local source file. It is uploaded
+and atomically renamed to the remote cluster's `postgresql.conf` before the reset sequence.
 
 `--drop-os-caches` runs on the remote host and requires a narrow passwordless
 sudo rule. Hardware collectors use `sudo -n` and fail fast when permission is

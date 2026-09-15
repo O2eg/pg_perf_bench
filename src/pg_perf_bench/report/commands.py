@@ -184,7 +184,7 @@ async def run_sql_command(logger, dbconn, item):
                 item['collection_status'] = 'ok'
             else:
                 item['theader'] = []
-                item['data'] = 'No rows returned by the SQL query.'
+                item['data'] = item.get('empty_message', 'No rows returned by the SQL query.')
                 item['item_type'] = 'plain_text'
                 item['collection_status'] = 'empty'
         except Exception as e:

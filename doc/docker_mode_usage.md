@@ -13,7 +13,7 @@ environments with `pg_stand` or another lifecycle tool.
 | `pgbench` and `psql` | Docker host |
 | Host fact collectors | Docker host (unprivileged; PostgreSQL `pg_config` stays in container) |
 | Timed `pg_diag` OS sampler | Docker host |
-| PostgreSQL lifecycle | container stop/start |
+| PostgreSQL lifecycle | Patroni API inside the container when detected; otherwise container stop/start |
 | Filesystem sync and optional cache drop | Docker host |
 
 Because workload generation is external to the container, the report describes
@@ -70,7 +70,7 @@ PGPASSWORD=secret pg-perf-bench benchmark \
 ```
 
 Benchmark mode may start a stopped container because destructive target access
-was explicitly confirmed. It recreates the selected database and stops/starts
+was explicitly confirmed. Without Patroni, it recreates the selected database and stops/starts
 the container between iterations. It does not delete the container or its
 volumes.
 
@@ -80,6 +80,15 @@ must remain disabled for maximum-TPS runs. CPU, RAM, disk, and network charts
 describe the Docker host that actually executes the PostgreSQL container.
 
 ## Configuration, caches, and facts
+
+[Patroni is detected automatically](../README.md#patroni). With Patroni, only
+PostgreSQL is restarted through the member's API; the container stays running.
+The API need not have a published port. The container's `postgres` account must
+be able to read Patroni's process environment and configuration. The two options
+below are rejected with Patroni before changes.
+
+Patroni's Python environment and the discovery interpreter inside the container
+must be Python 3.10 or newer. See the linked Patroni section for mTLS client settings.
 
 `--pg-custom-config FILE` copies a local file into the container and installs
 it as `postgresql.conf` with PostgreSQL ownership. The old file is not restored

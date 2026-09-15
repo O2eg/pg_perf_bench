@@ -10,7 +10,7 @@ generator all run on the same machine.
 | PostgreSQL connection | local host |
 | `pgbench` and `psql` | local host |
 | Host fact collectors | local host |
-| `pg_ctl` lifecycle | local host, under the `postgres` account |
+| PostgreSQL lifecycle | local Patroni API when detected; otherwise `pg_ctl` as `postgres` |
 | Filesystem sync and optional cache drop | local host |
 
 ## Prerequisites
@@ -18,9 +18,9 @@ generator all run on the same machine.
 - `pgbench` and `psql` are installed locally.
 - `--pg-bin-path` contains `pg_ctl` and `pg_config`.
 - `--pg-data-path` points to the disposable cluster being tested.
-- The invoking account can execute `su - postgres` non-interactively for
-  lifecycle operations. In a conventional installation this normally means
-  running the benchmark workflow as root in an isolated stand.
+- Without Patroni, the invoking account can execute `su - postgres`
+  non-interactively for lifecycle operations. In a conventional installation
+  this normally means running the benchmark workflow as root in an isolated stand.
 - PostgreSQL is reachable through `--host` and `--port`.
 
 Collection does not use `pg_ctl` and does not require database-reset
@@ -77,6 +77,14 @@ databases are always rejected, but every other database is treated as
 disposable after `--allow-database-reset` is supplied.
 
 ## Configuration and cache handling
+
+[Patroni is detected automatically](../README.md#patroni). For a Patroni-managed
+primary, PostgreSQL is restarted through that member's API. The local account
+must be able to read Patroni's process environment and configuration. The two
+options below are rejected with Patroni before any database changes.
+
+Patroni's Python environment and the discovery interpreter must be Python 3.10
+or newer. See the linked Patroni section for mTLS client settings.
 
 `--pg-custom-config FILE` atomically installs the supplied file as
 `postgresql.conf` before the reset sequence. Use this only for a disposable

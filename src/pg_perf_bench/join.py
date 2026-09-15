@@ -162,9 +162,11 @@ class ReportJoiner:
         """
         ref_steps, _ = parse_json_in_order(ref_rep)
         cmp_steps, _ = parse_json_in_order(cmp_rep)
-        # Result charts are derived output and may differ between report versions.
-        ref_steps = [step for step in ref_steps if step['section'] != 'result']
-        cmp_steps = [step for step in cmp_steps if step['section'] != 'result']
+        # Result charts and replication snapshots are merged separately.
+        # Older report-v1 artifacts did not collect the replication section.
+        separate_sections = {'result', 'replication'}
+        ref_steps = [step for step in ref_steps if step['section'] not in separate_sections]
+        cmp_steps = [step for step in cmp_steps if step['section'] not in separate_sections]
         if len(ref_steps) != len(cmp_steps):
             raise ValueError('Different step counts')
 
@@ -492,6 +494,32 @@ class ReportJoiner:
             except ValueError as exc:
                 logger.error(str(exc))
                 return None
+
+        replication_sources = [report.get('sections', {}).get('replication') for report in reports]
+        if any(section is not None for section in replication_sources):
+            replication = {
+                'header': 'Replication',
+                'description': 'Replication snapshots from each source report. '
+                'Missing evidence does not mean that replication was disabled.',
+                'state': 'expanded',
+                'reports': {},
+            }
+            for index, (label, section) in enumerate(
+                zip(source_labels, replication_sources, strict=True)
+            ):
+                if section is None:
+                    replication['reports'][f'source_{index}_unavailable'] = {
+                        'header': label,
+                        'item_type': 'plain_text',
+                        'data': 'Replication evidence was not collected in this source report.',
+                        'collection_status': 'unsupported',
+                    }
+                    continue
+                for name, source_item in section['reports'].items():
+                    item = copy.deepcopy(source_item)
+                    item['header'] = f'{label} | {item.get("header", name)}'
+                    replication['reports'][f'source_{index}_{name}'] = item
+            ref['sections']['replication'] = replication
 
         evidence = [
             {

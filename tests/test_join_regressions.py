@@ -79,6 +79,82 @@ def test_required_comparison_item_must_exist():
         ReportJoiner.compare_reports(MagicMock(), left, right, ['sections.db.reports.missing.data'])
 
 
+def _with_replication(report):
+    report['sections']['replication'] = {
+        'header': 'Replication',
+        'reports': {
+            'replication_slots': {
+                'header': 'Replication slots',
+                'item_type': 'table',
+                'sql_command_file': 'replication_slots.sql',
+                'theader': ['slot_name', 'active'],
+                'data': [['standby_slot', True]],
+                'collection_status': 'ok',
+            },
+        },
+    }
+    return report
+
+
+@pytest.mark.parametrize('old_first', [True, False])
+def test_join_old_and_new_reports_preserves_replication_evidence_and_sources(old_first, tmp_path):
+    from pg_perf_bench.report.processing import save_report
+
+    old = _report('old', 'A', 10)
+    new = _with_replication(_report('new', 'A', 20))
+    third = _with_replication(_report('third', 'A', 30))
+    # A successful empty result is distinct from a source with no collector.
+    third['sections']['replication']['reports']['replication_slots'].update(
+        item_type='plain_text', theader=[], data='No replication slots.', collection_status='empty'
+    )
+    reports = [old, new, third] if old_first else [new, old, third]
+    original = deepcopy(reports)
+    merged = ReportJoiner.merge_reports(
+        MagicMock(), [r['report_name'] + '.json' for r in reports], reports, [], raise_on_error=True
+    )
+    assert reports == original
+    items = list(merged['sections']['replication']['reports'].values())
+    by_source = {item['header'].split(' | ')[0]: item for item in items}
+    assert 'was not collected' in by_source['old']['data']
+    assert by_source['old']['collection_status'] == 'unsupported'
+    assert by_source['new']['data'] == [['standby_slot', True]]
+    assert by_source['new']['theader'] == ['slot_name', 'active']
+    assert by_source['third']['collection_status'] == 'empty'
+    assert len(merged['joined_benchmark_runs']) == 3
+    merged['report_name'] = 'mixed'
+    save_report(MagicMock(), merged, tmp_path)
+    html = (tmp_path / 'mixed.html').read_text()
+    assert 'Replication evidence was not collected' in html
+    assert 'standby_slot' in html
+
+
+def test_join_old_report_still_rejects_required_replication_evidence():
+    old = _report('old', 'A', 10)
+    new = _with_replication(_report('new', 'A', 20))
+    with pytest.raises(ValueError, match='Comparison item is missing: sections.replication'):
+        ReportJoiner.merge_reports(
+            MagicMock(),
+            ['old.json', 'new.json'],
+            [old, new],
+            ['sections.replication.reports.replication_slots.data'],
+            raise_on_error=True,
+        )
+
+
+def test_join_still_rejects_missing_non_replication_items():
+    complete = _report('complete', 'A', 10)
+    incomplete = _report('incomplete', 'A', 20)
+    del incomplete['sections']['db']['reports']['fact']
+    with pytest.raises(ValueError, match='Different step counts'):
+        ReportJoiner.merge_reports(
+            MagicMock(),
+            ['complete.json', 'incomplete.json'],
+            [complete, incomplete],
+            [],
+            raise_on_error=True,
+        )
+
+
 def test_machine_join_can_surface_the_exact_controlled_dimension_mismatch():
     left = _report('left', 'A', 10)
     right = _report('right', 'B', 11)

@@ -270,6 +270,81 @@
                 }
             }
         },
+        "replication": {
+            "header": "Replication",
+            "description": "Replication configuration and current state collected after the workload in benchmark mode, or during read-only collection. This is a snapshot, not a history of topology or per-transaction settings during the run.",
+            "state": "expanded",
+            "reports": {
+                "replication_mode": {
+                    "header": "Replication mode and commit acknowledgement",
+                    "description": "Configured standby selection, current sender/slot counts and collector session context. A disabled synchronous policy does not imply that asynchronous replication is present. Session or transaction SET commands in a custom workload may override this session default. NULL statistics mean insufficient visibility.",
+                    "state": "expanded",
+                    "item_type": "table",
+                    "sql_command_file": "replication_mode.sql",
+                    "theader": [],
+                    "data": []
+                },
+                "replication_settings": {
+                    "header": "Replication and WAL settings",
+                    "description": "Effective replication settings in the collector session, units, source and pending restart state. Only settings available on this PostgreSQL version are listed. Connection strings and passwords are excluded.",
+                    "state": "collapsed",
+                    "item_type": "table",
+                    "sql_command_file": "replication_settings.sql",
+                    "theader": [],
+                    "data": []
+                },
+                "replication_commit_overrides": {
+                    "header": "Permanent synchronous_commit overrides",
+                    "description": "ALTER ROLE / ALTER DATABASE defaults across the cluster, with applicability to the collector role and database. Role-in-database overrides take precedence over role defaults, which take precedence over database defaults. Session and transaction overrides are not captured.",
+                    "state": "collapsed",
+                    "item_type": "table",
+                    "sql_command_file": "replication_commit_overrides.sql",
+                    "theader": [],
+                    "data": [],
+                    "empty_message": "No permanent synchronous_commit overrides for roles or databases."
+                },
+                "replication_senders": {
+                    "header": "Connected replication senders",
+                    "description": "Physical and logical WAL senders, slot association, sync/quorum/async state, WAL positions and lag at collection time. A physical sender may also be a backup/WAL consumer. NULL lag is unknown, not zero; these are not benchmark-period averages. reply_time is available from PostgreSQL 12.",
+                    "state": "expanded",
+                    "item_type": "table",
+                    "sql_command_file": "replication_senders.sql",
+                    "theader": [],
+                    "data": [],
+                    "empty_message": "No connected replication senders at collection time. This does not rule out configured or disconnected consumers."
+                },
+                "replication_slots": {
+                    "header": "Replication slots",
+                    "description": "Cluster-wide physical/logical slots, activity and xmin horizons. wal_distance_bytes is the WAL distance to restart_lsn, not measured disk usage; distances overlap and must not be summed. Optional fields are NULL when unavailable or unknown: WAL status/safe size from PG13, two_phase from PG14, conflicting from PG16, inactive/invalidation/failover/synced fields from PG17.",
+                    "state": "expanded",
+                    "item_type": "table",
+                    "sql_command_file": "replication_slots.sql",
+                    "theader": [],
+                    "data": [],
+                    "empty_message": "No replication slots on this server. Replication can operate without slots."
+                },
+                "replication_receiver": {
+                    "header": "Physical replication receiver",
+                    "description": "Incoming physical replication and receive/replay positions on a standby. Sender address columns depend on the PostgreSQL version. Connection strings and passwords are excluded. This view does not describe incoming logical subscriptions.",
+                    "state": "collapsed",
+                    "item_type": "table",
+                    "sql_command_file": "replication_receiver.sql",
+                    "theader": [],
+                    "data": [],
+                    "empty_message": "No active physical WAL receiver on this server. A primary normally has none; a standby can use archive recovery or have a disconnected receiver."
+                },
+                "replication_subscriptions": {
+                    "header": "Logical subscriptions in the collected database",
+                    "description": "Configured incoming logical subscriptions, their worker commit policy and current worker count. Does not include subscriptions in other databases. Connection strings and passwords are excluded.",
+                    "state": "collapsed",
+                    "item_type": "table",
+                    "sql_command_file": "replication_subscriptions.sql",
+                    "theader": [],
+                    "data": [],
+                    "empty_message": "No logical subscriptions in the collected database."
+                }
+            }
+        },
         "benchmark": {
             "header": "Benchmark configuration",
             "description": "Run arguments, workload commands and profile files",

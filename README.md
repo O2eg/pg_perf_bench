@@ -75,7 +75,7 @@ Detailed operational guides are indexed in [doc/README.md](doc/README.md).
 
 ## Installation
 
-Create a virtual environment and install the package:
+Python 3.10 or newer is required. Create a virtual environment and install the package:
 
 ```bash
 python3 -m venv .venv
@@ -488,7 +488,7 @@ compatible with the provider's permissions.
 
 ### Iteration lifecycle
 
-For each axis value in the regular mode, the backend:
+For each axis value in the regular mode without Patroni, the backend:
 
 1. verifies access to the PostgreSQL instance;
 2. drops the dedicated benchmark database;
@@ -505,6 +505,68 @@ After the final iteration it collects the configured host and PostgreSQL facts
 and optionally archives PostgreSQL logs under `<output-dir>/db_logs/`, alongside
 the JSON and HTML report artifacts.
 
+### Patroni
+
+Benchmark mode automatically detects a running Patroni process on the selected
+Linux database host (local, SSH, or Docker). It matches Patroni's `postgresql.data_dir`
+to `--pg-data-path`, including symlinks. Merely installing `patronictl` does not
+select this mode. The host account must be able to read the Patroni process's
+`/proc` entries, environment and configuration; use the Patroni OS account or root.
+When invoked as root, the probe switches to the data directory owner's account,
+which also works in containers where root cannot read another user's process environment.
+
+Patroni detection and control require **Python 3.10 or newer on the database host**,
+including the Python environment of the running Patroni process. The detector
+first checks `python3` in `PATH`, then accessible running Python executables.
+If no compatible discovery interpreter is available, or Patroni itself uses an
+older Python, the run stops with an explicit version error before any database
+changes. A bare PostgreSQL container without Python can still use its normal
+lifecycle when no Patroni markers are present.
+
+The member helper uses the active process's Python environment and working directory.
+It supports a positional YAML file, a configuration directory, and environment-only
+configuration. The API address, authentication and TLS settings come from that
+configuration using Patroni's own request client. The API need only be reachable
+from the database host. Credentials are not copied into reports or command arguments.
+
+For an API requiring mutual TLS, configure `ctl.certfile` and `ctl.keyfile` with
+the client certificate and key. Server trust comes from `ctl.cacert` or
+`restapi.cafile`. The server's `restapi.certfile`/`restapi.keyfile` are not used as
+client credentials. All referenced files must be readable by the Patroni OS account.
+
+Before each iteration, the utility checks that SQL reaches the detected primary,
+drops the benchmark database, flushes filesystems, and requests a synchronous
+[`POST /restart`](https://patroni.readthedocs.io/en/latest/rest_api.html#restart-endpoint)
+on that member. It then waits for SQL access, verifies that the PostgreSQL start
+time changed, and recreates the benchmark database. Patroni and the Docker
+container remain running. Use a direct connection to the selected primary;
+a SQL connection to another member is rejected.
+
+API errors, timeouts, ambiguous detection, and Patroni data files without an
+identifiable running Patroni process stop the benchmark. They never trigger a
+fallback to `pg_ctl` or container stop/start. `--command-timeout` bounds remote
+commands and API requests; the utility does not override Patroni's failover settings.
+
+With Patroni, `--pg-custom-config` and `--drop-os-caches` are rejected before
+changing the database or uploading a configuration. Apply PostgreSQL settings
+through Patroni before the run. OS cache dropping requires PostgreSQL to remain
+stopped, which the Patroni restart API does not provide. Managed PostgreSQL mode
+continues to skip host lifecycle operations entirely.
+
+The opt-in integration test provisions a separate `pg_stand` container, installs
+Patroni and etcd, reproduces the `pg_ctl` race, and runs Docker, SSH, and local
+benchmarks, including a wheel installation, environment-only Patroni configuration,
+and an API protected by basic authentication and mutual TLS:
+
+```bash
+PG_STAND_BIN=/path/to/pg-stand \
+PG_PERF_BENCH_PATRONI_INTEGRATION=1 \
+python -m pytest -q -m integration tests/integration/test_pg_stand_patroni.py
+```
+
+The same test module checks rejection below Python 3.10 and discovery on Python
+3.10 using locally installed `python:3.9-slim` and `python:3.10-slim` images.
+
 ## Transports
 
 ### Local
@@ -513,7 +575,7 @@ the JSON and HTML report artifacts.
 --connection-type local
 ```
 
-Lifecycle commands use `pg_ctl` under the `postgres` account. Cache dropping
+Without Patroni, lifecycle commands use `pg_ctl` under the `postgres` account. Cache dropping
 requires a narrow non-interactive sudo rule for the specific command.
 
 ### Docker
@@ -606,6 +668,8 @@ A benchmark report contains:
   utilization/load, RAM usage/pressure, disk throughput/IOPS/utilization/latency,
   and network throughput/packets;
 - PostgreSQL version, available extensions, and server settings;
+- replication policy, connected WAL senders, replication slots, WAL receiver,
+  logical subscriptions, and persistent `synchronous_commit` overrides;
 - host, kernel, CPU, memory, storage, network, and filesystem facts;
 - item-level collection status and diagnostic reason;
 - an optional PostgreSQL log archive reference backed by the report-local
@@ -631,6 +695,39 @@ pg-perf-bench render \
   --out report/local-pg18.html
 ```
 
+### Replication evidence
+
+Benchmark, `collect-db-info`, and `collect-all-info` reports include a
+**Replication** section. The queries follow the replication items in `pg_diag`
+and support PostgreSQL 10–18.
+
+| Item | Evidence |
+| --- | --- |
+| Replication mode | Primary/standby role, FIRST/ANY policy and required standby count, connected senders, synchronous/quorum senders, and current `SyncRep` waiters |
+| Replication settings | WAL and replication settings, units, configuration source, and pending restart flags |
+| Commit policy overrides | Database, role, and role-in-database defaults for `synchronous_commit` |
+| WAL senders | Physical/logical consumers, associated slots, synchronous state, WAL positions, byte distances, and reported lag |
+| Replication slots | Physical/logical slots, activity, WAL distance from `restart_lsn`, xmin horizons, and version-dependent validity/failover fields |
+| WAL receiver | Upstream host/port, slot, receive/replay positions, and receiver timestamps on a standby |
+| Logical subscriptions | Current database's subscriptions, enabled state, owner, publications, slots, worker count, and worker commit policy |
+
+For benchmarks, this is a snapshot **after the workload iterations**, not a
+replication time series. The collector's effective `synchronous_commit` and
+persistent overrides provide configuration context; they cannot establish
+settings changed inside workload sessions or individual transactions. Configured
+synchronous standbys and actual connected senders are shown separately.
+
+Empty items have an explicit explanation. Missing privileges produce a collection
+error or restricted statistics, not a claim that replication is absent. Use a
+role with `pg_read_all_stats` for complete sender and wait-event statistics;
+subscription metadata additionally requires access to the listed `pg_subscription`
+columns (restricted by default on PostgreSQL 10–13). Connection strings and
+passwords are excluded from this section.
+
+Fields unavailable on an older PostgreSQL version remain `null`. WAL distances
+are differences between LSN positions, not disk usage measurements; distances
+for different slots overlap and must not be summed.
+
 ## Joining reports
 
 Join mode requires at least two benchmark reports with:
@@ -646,6 +743,12 @@ tables. TPS chart series, pgbench result tables, log references, and raw
 `benchmark_runs` evidence are deep-copied into the joined artifact. OS chart
 blocks are intentionally stacked vertically by source report and iteration;
 CPU profiles therefore remain visually comparable instead of being overlaid.
+
+Older `report-v1` artifacts without the Replication section can be joined with
+new reports. Replication snapshots are displayed separately for each source;
+an older source explicitly says that replication evidence was not collected.
+Original column headers and collection statuses are retained. Required join-task
+paths remain mandatory, including replication paths when explicitly selected.
 
 ```bash
 pg-perf-bench join \
@@ -730,6 +833,16 @@ uses an explicitly provisioned disposable `pg_stand` environment:
 ```bash
 PG_PERF_BENCH_PG_STAND_INTEGRATION=1 \
 python -m pytest -m integration tests/integration/test_pg_stand_smoke.py
+```
+
+Replication integration tests create and remove their own disposable containers.
+They use locally installed `postgres:10` through `postgres:18` images to check SQL
+compatibility and permissions, plus a real primary/standby pair to check
+asynchronous, FIRST, and ANY replication and a complete benchmark:
+
+```bash
+PG_PERF_BENCH_REPLICATION_INTEGRATION=1 \
+python -m pytest -m integration tests/integration/test_replication_report.py
 ```
 
 The legacy direct-Docker integration module is disabled unless

@@ -31,6 +31,7 @@ from pg_perf_bench.db_operations import (
     get_conn_type_tasks,
     run_command_result,
 )
+from pg_perf_bench.db_operations.patroni import PatroniController
 from pg_perf_bench.errors import CollectionError
 from pg_perf_bench.log import display_user_configuration
 from pg_perf_bench.managed import (
@@ -232,6 +233,17 @@ class BenchmarkRunner:
             conn_tasks = get_conn_type_tasks(conn_type)(
                 db_conf=workload_conf, conn=conn, logger=logger
             )
+
+            patroni = await PatroniController.detect(conn, workload_conf['pg_data_path'])
+            if patroni:
+                patroni.validate_options(workload_conf)
+                await patroni.verify_database(db_tasks)
+                await db_tasks.drop_db()
+                await conn_tasks.sync()
+                await patroni.restart(db_tasks, logger)
+                await db_tasks.init_db()
+                await db_tasks.check_user_db_access()
+                return
 
             try:
                 await conn_tasks.start_db()
@@ -639,6 +651,9 @@ class BenchmarkRunner:
                 )
                 report['postgresql_compatibility'] = compatibility
                 if workload_conf.get('pg_custom_config') and not managed_path:
+                    patroni = await PatroniController.detect(client, workload_conf['pg_data_path'])
+                    if patroni:
+                        patroni.validate_options(workload_conf)
                     custom_path = workload_conf['pg_custom_config']
                     db_path = workload_conf.get('pg_data_path', '')
                     logger.info(f'Sending custom PostgreSQL config: {custom_path}')

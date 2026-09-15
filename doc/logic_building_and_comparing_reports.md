@@ -103,6 +103,12 @@ Join requires at least two source reports with:
 - complete chart and pgbench-result structures;
 - every required join-task path present and equal.
 
+The Replication section is optional for older `report-v1` sources. A mixed join
+preserves each source's replication snapshot separately and labels sources that
+did not collect it. Missing replication evidence is not an empty slot list or a
+disabled replication policy. Explicitly required replication paths must still
+exist and match; other collector structure mismatches remain errors.
+
 The input directory should contain only the source JSON files intended for the
 comparison. Invalid non-reference JSON files are skipped with a warning. The
 operation fails if the explicit reference is missing, invalid, or incompatible.
@@ -131,6 +137,7 @@ The joined artifact contains:
   and benchmark iteration;
 - grouped pgbench result tables;
 - grouped PostgreSQL log references when available;
+- separate replication items per source, preserving column headers and statuses;
 - non-required differences rendered as report/value comparison tables;
 - deep-copied raw benchmark evidence in `joined_benchmark_runs`.
 
