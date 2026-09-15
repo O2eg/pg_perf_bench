@@ -2138,6 +2138,10 @@
             : `${metrics.interval_seconds ?? report.benchmark_methodology.system_metrics_interval_seconds}s`,
         ],
         [
+          'reset_mode',
+          safety.reset_mode ?? report.benchmark_methodology?.reset_mode,
+        ],
+        [
           'reset_db',
           safety.database_recreated_before_each_iteration
             ?? report.benchmark_methodology?.database_recreated_before_each_iteration,

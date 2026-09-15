@@ -1,18 +1,4 @@
--- Pagila functions reference tables without a schema; make every new session resolve them
--- instead of paying for a SET per transaction. The database-level default covers ad-hoc
--- sessions; the role-in-database setting takes precedence over an ALTER ROLE ... SET
--- search_path the benchmark role may carry, and it disappears with the database.
-DO $$
-BEGIN
-    EXECUTE format('ALTER DATABASE %I SET search_path = pagila, public', current_database());
-    EXECUTE format(
-        'ALTER ROLE %I IN DATABASE %I SET search_path = pagila, public',
-        current_user,
-        current_database()
-    );
-END
-$$;
-
+-- search_path is supplied by the common loader and pgbench connection settings.
 REFRESH MATERIALIZED VIEW pagila.rental_by_category;
 
 -- One-row bounds table: the pgbench scripts read it with \gset and pick identifiers with

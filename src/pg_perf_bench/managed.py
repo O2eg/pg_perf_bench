@@ -65,6 +65,11 @@ def add_managed_report_metadata(report: dict[str, Any], metadata: dict[str, Any]
         'data': metadata['content'],
         'collection_status': 'ok',
     }
+    mark_managed_report_unavailable(report)
+
+
+def mark_managed_report_unavailable(report: dict[str, Any]) -> None:
+    report['managed_postgresql'] = True
     for name, section in report['sections'].items():
         for item in section['reports'].values():
             if name == 'system' or 'shell_command_file' in item:

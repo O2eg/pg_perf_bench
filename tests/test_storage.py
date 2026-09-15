@@ -159,6 +159,7 @@ def test_after_snapshot_waits_for_os_sampler_to_finish():
 
 def test_snapshot_keeps_unavailable_database_and_other_sizes():
     db = AsyncMock()
+    db.is_closed = MagicMock(return_value=False)
     db.fetch.side_effect = [
         [
             {'database_oid': 1, 'database_name': 'unavailable', 'is_workload_database': False},

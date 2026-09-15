@@ -3,6 +3,12 @@
 The root [README](../README.md) describes the utility, its safety contract, and
 the main CLI workflows. This directory contains focused operational guides.
 
+All guides ship in both the wheel and source distribution. After installation,
+this index is `pg_perf_bench/docs/doc/README.md`; see
+[Installed documentation](../README.md#installed-documentation) for the command
+that locates the installed README. Relative links connect the guides, common
+initializer documentation, and packaged profile and JOIN READMEs.
+
 ## Guides
 
 | Document | Use it when |
@@ -10,6 +16,7 @@ the main CLI workflows. This directory contains focused operational guides.
 | [Local transport](local_mode_usage.md) | PostgreSQL and the workload generator run on the same host |
 | [Docker transport](docker_mode_usage.md) | PostgreSQL runs in an existing container |
 | [SSH transport](ssh_mode_usage.md) | PostgreSQL runs on a remote host reached through SSH |
+| [Managed PostgreSQL](managed_mode_usage.md) | SQL-only access to a pre-created benchmark database |
 | [Workload configuration](workload_description.md) | You are defining the init command, measured command, and iteration axis |
 | [Reports and comparisons](logic_building_and_comparing_reports.md) | You are consuming JSON/HTML artifacts or joining benchmark runs |
 | [`pg_play` integration](pg_play-integration.md) | You are invoking the versioned machine contract from an orchestrator |

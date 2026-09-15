@@ -190,6 +190,8 @@ class WorkloadConfig:
     workload_duration_seconds: int | None = None
     pg_custom_config: str | None = None
     allow_database_reset: bool = False
+    reset_mode: str = 'database'
+    managed: bool = False
     drop_os_caches: bool = False
     system_metrics_interval: float = 1.0
     system_metrics_duration: float | None = None
@@ -200,7 +202,7 @@ class WorkloadConfig:
     init_batch_rows: int = 100_000
     init_table_mode: str = 'unlogged'
     init_fsync: str = 'off'
-    init_synchronous_commit: str = 'off'
+    init_synchronous_commit: str = 'keep'
 
     def as_legacy_dict(self, host: HostConfig) -> dict[str, Any]:
         return {
@@ -219,6 +221,8 @@ class WorkloadConfig:
             'pgbench_iter_list': list(self.iterations),
             'pg_custom_config': self.pg_custom_config,
             'allow_database_reset': self.allow_database_reset,
+            'reset_mode': self.reset_mode,
+            'managed': self.managed,
             'drop_os_caches': self.drop_os_caches,
             'system_metrics_interval': self.system_metrics_interval,
             'system_metrics_duration': self.system_metrics_duration,
@@ -269,17 +273,20 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
     if managed_pg_info:
         metadata = read_managed_pg_info(managed_pg_info)
         managed_pg_info = metadata['path']
+    managed = bool(values.get('managed') or managed_pg_info)
+    if managed:
+        managed_option = '--managed' if values.get('managed') else '--managed-pg-info'
         if values.get('connection_type') not in (None, str(ConnectionType.LOCAL)):
-            raise ConfigurationError('--managed-pg-info cannot be combined with SSH or Docker')
+            raise ConfigurationError(f'{managed_option} cannot be combined with SSH or Docker')
         for option in ('pg_custom_config', 'drop_os_caches', 'container_name', 'ssh_host'):
             if values.get(option):
                 raise ConfigurationError(
-                    '--managed-pg-info cannot be combined with --' + option.replace('_', '-')
+                    managed_option + ' cannot be combined with --' + option.replace('_', '-')
                 )
     try:
         connection_type = ConnectionType(
             ConnectionType.MANAGED
-            if managed_pg_info
+            if managed
             else _required(values.get('connection_type'), '--connection-type')
         )
     except ValueError as exc:
@@ -304,9 +311,9 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
 
     pg_data_path = values.get('pg_data_path')
     pg_bin_path = values.get('pg_bin_path')
-    if mode == WorkMode.BENCHMARK and not managed_pg_info:
+    if mode == WorkMode.BENCHMARK and not managed:
         _required(pg_data_path, '--pg-data-path')
-    if needs_database and not managed_pg_info:
+    if needs_database and not managed:
         _required(pg_bin_path, '--pg-bin-path')
 
     ssh_key_value = values.get('ssh_key')
@@ -341,7 +348,7 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
     if mode == WorkMode.BENCHMARK:
         if not values.get('allow_database_reset'):
             raise ConfigurationError(
-                'benchmark recreates --database; pass --allow-database-reset '
+                'benchmark resets the database or profile schemas; pass --allow-database-reset '
                 'after selecting a dedicated disposable database'
             )
         assert database is not None
@@ -425,8 +432,21 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
                 Path(workload_path).expanduser().resolve()
             ):
                 raise ConfigurationError('Initialization entrypoint must be inside the profile')
-            if managed_pg_info and values.get('init_fsync', 'off') == 'off':
+            if managed and values.get('init_fsync', 'off') == 'off':
                 raise ConfigurationError('Managed fast initialization requires --init-fsync keep')
+        reset_mode = values.get('reset_mode', 'database')
+        if reset_mode not in ('database', 'schema'):
+            raise ConfigurationError('Unsupported reset mode')
+        if reset_mode == 'schema':
+            if init_mode != 'fast':
+                raise ConfigurationError('--reset-mode schema requires a common fast load plan')
+            if values.get('init_fsync', 'off') != 'keep':
+                raise ConfigurationError('--reset-mode schema requires --init-fsync keep')
+            for option in ('pg_custom_config', 'drop_os_caches'):
+                if values.get(option):
+                    raise ConfigurationError(
+                        '--reset-mode schema cannot be combined with --' + option.replace('_', '-')
+                    )
         init_command = values.get('init_command') or (
             profile['benchmark'].get('init_command') if profile is not None else None
         )
@@ -447,7 +467,7 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
             ),
             init_table_mode=values.get('init_table_mode', 'unlogged'),
             init_fsync=values.get('init_fsync', 'off'),
-            init_synchronous_commit=values.get('init_synchronous_commit', 'off'),
+            init_synchronous_commit=values.get('init_synchronous_commit', 'keep'),
             workload_command=str(
                 _required(
                     values.get('workload_command')
@@ -465,6 +485,8 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
             workload_duration_seconds=workload_duration_seconds,
             pg_custom_config=custom_config,
             allow_database_reset=True,
+            reset_mode=reset_mode,
+            managed=managed,
             managed_pg_info=managed_pg_info,
             drop_os_caches=bool(values.get('drop_os_caches')),
             system_metrics_interval=_positive_float(

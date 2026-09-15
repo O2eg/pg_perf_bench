@@ -101,6 +101,9 @@ def test_profiles_batch_sizes_server_versions_and_all_workload_scripts(profile):
             assert actual == expected
             env = {
                 **os.environ,
+                'PGOPTIONS': '-c search_path='
+                + ('imdb' if profile == 'imdb' else 'pagila')
+                + ',public',
                 **{
                     key: str(conf[value])
                     for key, value in (
@@ -149,7 +152,7 @@ def test_fsync_exact_restore_recovery_and_failure(tmp_path, override):
             transport = DockerConnection({'container_name': container.name}, {})
             await transport.start()
             db = await asyncpg.connect(**conf)
-            options = LoadOptions(batch_rows=2)
+            options = LoadOptions(batch_rows=2, synchronous_commit='off')
 
             def factory(*args, **kwargs):
                 return InitializationSettings(*args, **kwargs, state_dir=tmp_path)
@@ -387,7 +390,7 @@ def test_two_synchronous_replicas_do_not_block_load_but_must_replay_before_retur
                             LOGGER,
                             plan,
                             conf,
-                            LoadOptions(batch_rows=137),
+                            LoadOptions(batch_rows=137, synchronous_commit='off'),
                             ConnectionType.DOCKER,
                             transport,
                         )

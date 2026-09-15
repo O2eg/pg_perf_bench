@@ -14,7 +14,7 @@ selects it. Arbitrary old commands remain supported without SQL rewriting.
 | `--init-batch-rows` | `100000` | Target rows per committed data batch |
 | `--init-table-mode` | `unlogged` | Stored tables become UNLOGGED before data, then LOGGED afterward; `logged` skips conversion |
 | `--init-fsync` | `off` | Temporarily disable fsync on the selected primary; `keep` preserves it |
-| `--init-synchronous-commit` | `off` | Session setting in every loader connection; alternatives: `local`, `keep` |
+| `--init-synchronous-commit` | `keep` | Preserve the session commit policy; explicit `off` or `local` opts into faster loading |
 
 The same scheduler runs bounded data batches and later builds indexes, including
 unique indexes used for primary keys. It keeps at most `init-workers` jobs in
@@ -22,7 +22,23 @@ flight, regardless of dataset size. A batch commits independently; the loader
 does not create one transaction for the entire dataset. Progress logs report
 committed rows and batches per task.
 
-Order for each fresh database:
+Before each iteration, `--reset-mode database` (default) recreates the disposable
+database. `--reset-mode schema` resets the schemas in `LoadPlan.schemas` inside
+a pre-created dedicated database; it requires fast initialization and `--init-fsync keep`.
+It uses the target database for version checks, the controller connection, reset,
+loader and replay barrier. No connection to `postgres` is made in this mode.
+Use `--managed` to disable host access and server lifecycle operations explicitly;
+an optional `--managed-pg-info FILE` embeds provider metadata and also implies this flag.
+
+Schema reset checks CREATE privilege, schema ownership, read-write status and
+UNLOGGED/LOGGED conversion before deleting existing schemas. It refuses `public`,
+system schemas and system databases. A session advisory lock is held through the
+workload to prevent another schema-mode run from resetting the same database.
+Direct connections and compatible session pooling are supported; transaction/statement pooling
+are not. See the [pool requirements](doc/managed_mode_usage.md#connection-pooling). Reset does not alter database ownership, ACLs or permanent role settings.
+Use a dedicated database: CASCADE also removes objects depending on the profile schemas.
+
+Order for each fresh dataset:
 
 1. Create the schema without indexes or foreign keys; make stored tables UNLOGGED.
 2. Run data tasks in bounded batches, respecting their declared dependencies.
@@ -31,8 +47,8 @@ Order for each fresh database:
 5. Build indexes in parallel using the same worker limit and scheduler.
 6. Attach constraints and validate foreign keys, serially to avoid lock-order deadlocks.
 7. Complete profile setup and run `VACUUM (FREEZE, ANALYZE)` on stored tables and
-   materialized views, then `ANALYZE`.
-8. Restore fsync, checkpoint and synchronize files on the database host.
+   materialized views, then `ANALYZE` the profile relations, including partitioned parents.
+8. Restore fsync, checkpoint and synchronize files on the database host if fsync was changed.
 9. Wait until directly connected physical replicas replay the initialization WAL.
 10. Capture **Before workload** sizes and start pgbench with the original commit policy.
 
@@ -41,7 +57,22 @@ host command, and replica wait. It does not bound the sum of all data batches.
 For large datasets, increase it to cover the longest table rewrite/index build
 and the time replicas need to catch up. A timeout or failed phase aborts the run
 before pgbench. Failed batches are not automatically retried; the next run
-recreates the disposable database.
+resets the database or profile schemas according to `--reset-mode`.
+
+The common loader sets `search_path` from `LoadPlan.schemas` through SQL after
+opening each asyncpg connection. Explicit loader commit overrides are applied and
+verified the same way. Both settings are restored before returning connections to
+a session pool, including after errors and cancellation. Advisory locks are
+explicitly released. Diagnostic sessions reset their read-only mode and timeouts
+before returning to the pool. pgbench receives `search_path` through its child
+`PGOPTIONS`, preserving other caller options. In schema mode, a read-only psql
+probe checks the same libpq options before any schema reset; read-only pgbench
+probes also check prepared-statement cleanup. Incompatible pools are rejected
+with a configuration error before the existing dataset is removed. Bundled fast
+profiles do not change database/role search_path.
+The workload does not inherit the loader's temporary synchronous_commit value.
+Legacy Pagila initialization retains its existing persistent search_path setup
+and requires database reset; arbitrary legacy commands do not support schema reset.
 
 ## Durability and replication
 
@@ -78,9 +109,14 @@ without host identity require the original SQL address; if it has changed, the
 run stops and reports the journal path for recovery on the original server.
 
 Patroni's synchronous mode, DCS configuration and `synchronous_standby_names`
-remain unchanged. `synchronous_commit=off` in loader sessions removes waits for
-synchronous replica acknowledgements. It does **not** eliminate the WAL needed
-to convert tables to LOGGED or build their indexes. UNLOGGED contents are not
+remain unchanged. By default, `--init-synchronous-commit keep` leaves each loader
+session's commit policy untouched. Explicit `--init-synchronous-commit off` removes
+waits for local WAL flush and synchronous replica acknowledgements during preparation.
+`--init-synchronous-commit local` keeps local WAL flush waits but removes synchronous
+replica acknowledgement waits. These options affect only the loader; pgbench uses
+its original commit policy, and the mandatory replay barrier runs with every option.
+Changing commit policy does not eliminate the WAL needed to convert tables to LOGGED
+or build their indexes. UNLOGGED contents are not
 sent to replicas during data generation; conversion rewrites each table and
 generates its WAL. Budget disk space for a full extra copy of the largest table,
 WAL and index-building temporary files. Conversion of a single table remains
@@ -98,7 +134,9 @@ including VACUUM, fsync restoration and CHECKPOINT. Every required replica must 
 no WAL from data preparation may remain unapplied when pgbench starts.
 Cascaded replicas and logical subscribers are not covered by this
 primary-side physical replay barrier. A restricted SQL role needs visibility of
-replica statistics (`pg_read_all_stats` or `pg_monitor`) when replicas are connected.
+replica statistics (`pg_read_all_stats`, `pg_monitor` or equivalent provider privileges)
+when replicas are connected. WAL-function access is checked at preflight too;
+insufficient permissions stop the run before reset/loading.
 
 Initialization options, per-phase durations, committed row/batch counts, final
 fsync and the replay barrier are included in JSON and HTML reports. Options

@@ -1,5 +1,4 @@
 import asyncio
-import os
 import platform
 import re
 import sys
@@ -33,8 +32,9 @@ from pg_perf_bench.db_operations import (
     get_conn_type_tasks,
     run_command_result,
 )
+from pg_perf_bench.db_operations.db import validate_reset_schemas
 from pg_perf_bench.db_operations.patroni import PatroniController
-from pg_perf_bench.errors import CollectionError
+from pg_perf_bench.errors import CollectionError, ConfigurationError
 from pg_perf_bench.executors.process import ProcessResult
 from pg_perf_bench.initialization import (
     LoadOptions,
@@ -42,17 +42,27 @@ from pg_perf_bench.initialization import (
     build_initialization_section,
     load_plan,
 )
-from pg_perf_bench.initialization_settings import InitializationSettings, initialize_database
+from pg_perf_bench.initialization_settings import (
+    InitializationSettings,
+    close_initialization_settings,
+    initialize_database,
+)
 from pg_perf_bench.log import display_user_configuration
 from pg_perf_bench.managed import (
     MANAGED_NO_DATA,
     add_managed_report_metadata,
+    mark_managed_report_unavailable,
     mark_managed_unavailable,
     read_managed_pg_info,
 )
 from pg_perf_bench.pgbench_metrics import LEGACY_METRIC_KEYS, parse_pgbench_metrics
 from pg_perf_bench.report.commands import fill_info_report
 from pg_perf_bench.report.processing import get_report_structure
+from pg_perf_bench.session_settings import (
+    check_workload_session,
+    close_diagnostic_connection,
+    workload_environment,
+)
 from pg_perf_bench.storage import (
     build_storage_section,
     collect_storage_snapshot,
@@ -96,17 +106,21 @@ class BenchmarkRunner:
     def environment_evidence(report: dict[str, Any]) -> dict[str, Any]:
         """Build stable dimension hashes without volatile usage counters."""
         managed_info = report.get('managed_pg_info')
-        if managed_info:
+        if managed_info or report.get('managed_postgresql'):
             load_generator = (report.get('postgresql_compatibility') or {}).get('load_generator')
             identity = {
-                'managed_pg_info_hash': managed_info['hash'],
+                'managed_pg_info_hash': managed_info['hash'] if managed_info else None,
+                'endpoint': (report.get('invocation') or {}).get('database'),
                 'load_generator': load_generator,
             }
             return {
                 'schema_version': 'pg_perf_bench/environment-evidence-v1',
                 'identity_hash': canonical_hash(identity),
                 'dimensions': {
-                    'managed_instance': {'hash': managed_info['hash'], 'items': ['managed_pg_info']}
+                    'managed_instance': {
+                        'hash': managed_info['hash'] if managed_info else None,
+                        'items': ['managed_pg_info'] if managed_info else [],
+                    }
                 },
                 'load_generator_hash': canonical_hash(load_generator),
                 'system_metrics_collection_scope': 'unavailable_managed_postgresql',
@@ -235,7 +249,14 @@ class BenchmarkRunner:
 
     @staticmethod
     async def reset_db_environment(
-        logger, conn_type: str, conn, db_conf: dict, workload_conf: dict
+        logger,
+        conn_type: str,
+        conn,
+        db_conf: dict,
+        workload_conf: dict,
+        *,
+        schema_connection=None,
+        schemas=(),
     ) -> None:
         """
         Fully resets the database environment before a test iteration.
@@ -246,7 +267,20 @@ class BenchmarkRunner:
             )
         try:
             db_tasks = DBTasks(db_conf, logger)
-            if workload_conf.get('managed_pg_info') or conn_type == ConnectionType.MANAGED:
+            if workload_conf.get('reset_mode') == 'schema':
+                if schema_connection is None:
+                    raise ConfigurationError('Schema reset requires an open preflight connection')
+                await db_tasks.reset_schemas(
+                    schema_connection,
+                    schemas,
+                    timeout=float(workload_conf.get('command_timeout', 300)),
+                )
+                return
+            if (
+                workload_conf.get('managed')
+                or workload_conf.get('managed_pg_info')
+                or conn_type == ConnectionType.MANAGED
+            ):
                 await db_tasks.check_db_access()
                 await db_tasks.drop_db()
                 await db_tasks.init_db()
@@ -329,20 +363,11 @@ class BenchmarkRunner:
         initialization_plan: LoadPlan | None = None,
         initialization_options: LoadOptions | None = None,
         required_replicas=None,
+        initialization_settings=None,
     ) -> dict[str, Any]:
         init_cmd, workload_cmd = load_iteration
-        environment = os.environ.copy()
-        environment.update(
-            {
-                'PGHOST': str(db_conf.get('host', '')),
-                'PGPORT': str(db_conf.get('port', '')),
-                'PGUSER': str(db_conf.get('user', '')),
-                'PGDATABASE': str(db_conf.get('database', '')),
-            }
-        )
+        environment = workload_environment(db_conf, initialization_plan)
         password = db_conf.get('password')
-        if password:
-            environment['PGPASSWORD'] = str(password)
         secrets = (str(password) if password else None,)
         initialization = None
         if initialization_plan is not None:
@@ -356,6 +381,7 @@ class BenchmarkRunner:
                 connection_type,
                 connection,
                 required_replicas=required_replicas,
+                settings=initialization_settings,
             )
             init_result = ProcessResult(
                 argv=(init_cmd,),
@@ -447,7 +473,9 @@ class BenchmarkRunner:
             for key, value in db_conf.items()
             if key not in {'database', 'connect_timeout'}
         }
-        connection_kwargs['database'] = 'postgres'
+        connection_kwargs['database'] = (
+            db_conf['database'] if workload_conf.get('reset_mode') == 'schema' else 'postgres'
+        )
         connection_kwargs['timeout'] = float(db_conf.get('connect_timeout', 5.0))
         connection = await asyncpg.connect(**connection_kwargs)
         try:
@@ -501,7 +529,7 @@ class BenchmarkRunner:
         workload_conf: dict[str, Any],
     ) -> dict[str, Any]:
         """Return the safe, user-facing parameters that define a benchmark run."""
-        managed = bool(workload_conf.get('managed_pg_info'))
+        managed = bool(workload_conf.get('managed') or workload_conf.get('managed_pg_info'))
         return {
             'schema_version': 'pg_perf_bench/invocation-v1',
             'mode': 'benchmark',
@@ -530,7 +558,9 @@ class BenchmarkRunner:
                 ),
             },
             'safety': {
-                'database_recreated_before_each_iteration': True,
+                'reset_mode': workload_conf.get('reset_mode', 'database'),
+                'database_recreated_before_each_iteration': workload_conf.get('reset_mode')
+                != 'schema',
                 'database_reset_authorized': bool(workload_conf.get('allow_database_reset')),
                 'os_caches_dropped_before_each_iteration': bool(
                     workload_conf.get('drop_os_caches')
@@ -575,44 +605,79 @@ class BenchmarkRunner:
                 workload_conf.get('workload_scale', 1.0),
             )
             initialization_options = LoadOptions.from_config(workload_conf)
+        schema_reset = workload_conf.get('reset_mode') == 'schema'
+        if schema_reset:
+            if initialization_plan is None or initialization_options.fsync != 'keep':
+                raise ConfigurationError(
+                    'Schema reset requires a fast load plan and --init-fsync keep'
+                )
+            validate_reset_schemas(initialization_plan.schemas)
+            await check_workload_session(
+                db_conf,
+                initialization_plan,
+                psql_path=workload_conf.get('psql_path') or 'psql',
+                pgbench_path=workload_conf.get('pgbench_path') or 'pgbench',
+                timeout=initialization_options.timeout,
+            )
         logger.info('Starting load iterations...')
         for idx, load_iteration in enumerate(load_iterations, start=1):
             logger.info(f'Preparing for iteration {idx}...')
             required_replicas = None
-            if initialization_plan is not None or InitializationSettings.recovery_pending():
-                # Recover an interrupted fsync override and check privileges
-                # before the destructive reset. Reset can restart PostgreSQL,
-                # so initialization acquires a fresh connection afterward.
-                preflight = InitializationSettings(
-                    logger,
-                    db_conf,
-                    initialization_options or LoadOptions(fsync='keep'),
-                    conn_type,
-                    client,
+            preflight = None
+            preflight_opened = False
+            try:
+                if initialization_plan is not None or InitializationSettings.recovery_pending():
+                    # Database reset closes this guard before restart; schema reset keeps
+                    # the target-database lock until the workload has finished.
+                    preflight = InitializationSettings(
+                        logger,
+                        db_conf,
+                        initialization_options or LoadOptions(fsync='keep'),
+                        conn_type,
+                        client,
+                        control_database=db_conf['database'] if schema_reset else 'postgres',
+                    )
+                    await preflight.open(recover_only=initialization_plan is None)
+                    preflight_opened = True
+                    required_replicas = preflight.replicas.copy()
+                    if schema_reset:
+                        await DBTasks(db_conf, logger).check_schema_reset(
+                            preflight.db,
+                            initialization_plan.schemas,
+                            table_mode=initialization_options.table_mode,
+                        )
+                    else:
+                        await close_initialization_settings(preflight)
+                        preflight = None
+                reset_kwargs = (
+                    {'schema_connection': preflight.db, 'schemas': initialization_plan.schemas}
+                    if schema_reset
+                    else {}
                 )
-                await preflight.open(recover_only=initialization_plan is None)
-                required_replicas = preflight.replicas.copy()
-                await preflight.close()
-            await BenchmarkRunner.reset_db_environment(
-                logger, conn_type, client, db_conf, workload_conf
-            )
-            result = deepcopy(
-                await BenchmarkRunner.run_benchmark_with_evidence(
-                    logger,
-                    load_iteration,
-                    db_conf=db_conf,
-                    command_timeout=float(workload_conf.get('command_timeout', 300.0)),
-                    connection_type=conn_type,
-                    connection=client,
-                    system_metrics_interval=float(
-                        workload_conf.get('system_metrics_interval', 1.0)
-                    ),
-                    system_metrics_duration=workload_conf.get('system_metrics_duration'),
-                    initialization_plan=initialization_plan,
-                    initialization_options=initialization_options,
-                    required_replicas=required_replicas,
+                await BenchmarkRunner.reset_db_environment(
+                    logger, conn_type, client, db_conf, workload_conf, **reset_kwargs
                 )
-            )
+                result = deepcopy(
+                    await BenchmarkRunner.run_benchmark_with_evidence(
+                        logger,
+                        load_iteration,
+                        db_conf=db_conf,
+                        command_timeout=float(workload_conf.get('command_timeout', 300.0)),
+                        connection_type=conn_type,
+                        connection=client,
+                        system_metrics_interval=float(
+                            workload_conf.get('system_metrics_interval', 1.0)
+                        ),
+                        system_metrics_duration=workload_conf.get('system_metrics_duration'),
+                        initialization_plan=initialization_plan,
+                        initialization_options=initialization_options,
+                        required_replicas=required_replicas,
+                        initialization_settings=preflight,
+                    )
+                )
+            finally:
+                if preflight is not None and preflight_opened:
+                    await close_initialization_settings(preflight)
             iteration_values = workload_conf.get('pgbench_iter_list', [])
             result['iteration'] = {
                 'index': idx,
@@ -648,7 +713,7 @@ class BenchmarkRunner:
         try:
             await fill_info_report(logger, client, db_conn, report_data, report)
             logger.info('Monitoring data collected.')
-            if log_conf.get('collect_pg_logs') and not report.get('managed_pg_info'):
+            if log_conf.get('collect_pg_logs') and not report.get('managed_postgresql'):
                 await collect_db_logs(
                     logger,
                     client,
@@ -657,7 +722,7 @@ class BenchmarkRunner:
                     log_conf.get('db_logs_dir'),
                 )
         finally:
-            await db_conn.close()
+            await close_diagnostic_connection(db_conn)
             logger.info('Monitoring DB connection closed.')
 
     @staticmethod
@@ -681,6 +746,11 @@ class BenchmarkRunner:
         try:
             report = BenchmarkRunner.setup_report_structure(report_conf, logger)
             managed_path = workload_conf.get('managed_pg_info')
+            managed = bool(
+                workload_conf.get('managed') or managed_path or conn_type == ConnectionType.MANAGED
+            )
+            if managed:
+                mark_managed_report_unavailable(report)
             if managed_path:
                 add_managed_report_metadata(report, read_managed_pg_info(managed_path))
             report['invocation'] = BenchmarkRunner.build_invocation_summary(
@@ -695,7 +765,7 @@ class BenchmarkRunner:
 
             connection = (
                 nullcontext(None)
-                if managed_path
+                if managed
                 else BenchmarkRunner.setup_connection(conn_type, conn_conf, logger)
             )
             if not connection:
@@ -705,15 +775,18 @@ class BenchmarkRunner:
                 'args': args,
                 'workload_conf': workload_conf,
                 'report_conf': report_conf,
-                'managed_postgresql': bool(managed_path),
+                'managed_postgresql': managed,
             }
             workload_evidence = build_workload_evidence(workload_conf, load_iterations)
             report_data['workload_evidence'] = workload_evidence
             report['workload_evidence'] = workload_evidence
             report['benchmark_methodology'] = {
-                'database_recreated_before_each_iteration': True,
-                'server_restarted_before_each_iteration': not bool(managed_path),
-                'managed_postgresql': bool(managed_path),
+                'reset_mode': workload_conf.get('reset_mode', 'database'),
+                'database_recreated_before_each_iteration': workload_conf.get('reset_mode')
+                != 'schema',
+                'server_restarted_before_each_iteration': not managed
+                and workload_conf.get('reset_mode') != 'schema',
+                'managed_postgresql': managed,
                 'os_caches_dropped_before_each_iteration': bool(
                     workload_conf.get('drop_os_caches')
                 ),
@@ -722,15 +795,13 @@ class BenchmarkRunner:
                 'vacuum_analyze_before_each_workload': True,
                 'storage_snapshots': ['before_workload', 'after_workload'],
                 'initialization': workload_evidence['initialization'],
-                'system_metrics_engine': None if managed_path else 'pg_diag',
-                'system_metrics_collected_during_workload': not bool(managed_path),
+                'system_metrics_engine': None if managed else 'pg_diag',
+                'system_metrics_collected_during_workload': not managed,
                 'system_metrics_interval_seconds': (
-                    None
-                    if managed_path
-                    else float(workload_conf.get('system_metrics_interval', 1.0))
+                    None if managed else float(workload_conf.get('system_metrics_interval', 1.0))
                 ),
                 'system_metrics_duration_override': (
-                    None if managed_path else workload_conf.get('system_metrics_duration')
+                    None if managed else workload_conf.get('system_metrics_duration')
                 ),
             }
 
@@ -740,7 +811,7 @@ class BenchmarkRunner:
                     workload_conf,
                 )
                 report['postgresql_compatibility'] = compatibility
-                if workload_conf.get('pg_custom_config') and not managed_path:
+                if workload_conf.get('pg_custom_config') and not managed:
                     patroni = await PatroniController.detect(client, workload_conf['pg_data_path'])
                     if patroni:
                         patroni.validate_options(workload_conf)
@@ -768,7 +839,7 @@ class BenchmarkRunner:
                         benchmark_runs, workload_evidence['initialization']
                     )
                 report['sections']['os_metrics'] = build_system_metrics_section(benchmark_runs)
-                if managed_path:
+                if managed:
                     section = report['sections']['os_metrics']
                     section['description'] = MANAGED_NO_DATA
                     for item in section['reports'].values():

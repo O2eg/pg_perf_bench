@@ -1,1 +1,4 @@
 include INITIALIZATION.md
+recursive-include doc *.md
+include tests/benchmark/README.md
+include tests/packaging/check_docs.py

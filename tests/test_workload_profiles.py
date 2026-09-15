@@ -160,6 +160,7 @@ def test_join_catalog_has_documented_practical_scenarios():
         'compare-storage',
         'tune-os-kernel',
         'compare-postgresql-major',
+        'compare-deployments',
         'repeatability',
     }
     assert load_join_task('task_compare_dbs_on_single_host.json')['id'] == 'optimize-db-config'

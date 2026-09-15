@@ -12,7 +12,7 @@ Load approximately **1 GiB of tables plus indexes** for Pagila, then IMDb:
 
 ```bash
 python -m tests.benchmark.initialization_speed \
-  --output /tmp/pg-perf-load-1g
+  --init-synchronous-commit off --output /tmp/pg-perf-load-1g
 ```
 
 The output directory must be new. Omit `--output` to create a unique temporary
@@ -56,8 +56,10 @@ The selected target measurement includes:
 6. Waiting until both replicas have replayed the preparation WAL.
 
 Defaults match the accelerated loader: four workers, 100000 rows per batch,
-temporary `fsync=off` on the primary and `synchronous_commit=off` in loader
-connections. Ordinary sessions use `remote_apply` with two synchronous replicas.
+temporary `fsync=off` on the primary and unchanged commit policy (`keep`) in loader
+connections. Pass `--init-synchronous-commit off` (as in the accelerated example)
+to disable acknowledgement/flush waits during loading, or `local` to retain local
+flush waits. Ordinary sessions use `remote_apply` with two synchronous replicas.
 The script verifies restoration of the settings, valid indexes/constraints,
 LOGGED tables and no unapplied preparation WAL on either replica.
 

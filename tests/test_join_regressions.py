@@ -304,3 +304,43 @@ def test_join_rebases_report_local_log_links_to_join_directory(tmp_path: Path):
         destination,
     )
     assert report['sections']['result']['reports']['logs']['data'] == expected
+
+
+def test_deployment_comparison_allows_infrastructure_changes_but_controls_preparation():
+    from pg_perf_bench.join_catalog import load_join_task
+    from pg_perf_bench.workloads import build_workload_evidence
+    from tests.test_workload_profiles import _profile_runtime
+
+    runtime = _profile_runtime('pagila')
+    workload = {
+        **runtime.workload.as_legacy_dict(runtime.host),
+        'reset_mode': 'schema',
+        'init_fsync': 'keep',
+    }
+    left = _report('managed', 'cloud PostgreSQL', 100)
+    left['workload_evidence'] = build_workload_evidence(workload, [])
+    left['environment_evidence'] = {
+        'load_generator_hash': 'same-client-tools',
+        'identity_hash': 'cloud',
+    }
+    left['benchmark_methodology'] = {
+        'reset_mode': 'schema',
+        'server_restarted_before_each_iteration': False,
+        'os_caches_dropped_before_each_iteration': False,
+    }
+    right = deepcopy(left)
+    right['report_name'] = 'patroni'
+    right['environment_evidence']['identity_hash'] = 'patroni'
+    right['sections']['db']['reports']['fact']['data'] = 'Patroni PostgreSQL'
+    items = load_join_task('compare-deployments')['items']
+    assert ReportJoiner.compare_reports(MagicMock(), left, right, items)
+    merged = ReportJoiner.merge_reports(
+        MagicMock(), ['managed.json', 'patroni.json'], [left, right], items
+    )
+    assert len(merged['joined_benchmark_runs']) == 2
+    # A different loader policy must not be hidden behind the deployment comparison.
+    right['workload_evidence'] = build_workload_evidence(
+        {**workload, 'init_synchronous_commit': 'off'}, []
+    )
+    with pytest.raises(ValueError, match='workload_evidence.execution_hash'):
+        ReportJoiner.compare_reports(MagicMock(), left, right, items)

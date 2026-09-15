@@ -176,9 +176,14 @@ def build_parser() -> argparse.ArgumentParser:
     _add_host_args(benchmark, required=False)
     _add_database_args(benchmark, include_custom_config=True)
     benchmark.add_argument(
+        '--managed',
+        action='store_true',
+        help='managed PostgreSQL: SQL access only; no host access, restart or server configuration',
+    )
+    benchmark.add_argument(
         '--managed-pg-info',
         metavar='FILE',
-        help='managed PostgreSQL mode: embed this metadata file and use database access only',
+        help='optional instance metadata to embed in the report; also implies --managed',
     )
     benchmark.add_argument(
         '--benchmark-type',
@@ -223,9 +228,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     benchmark.add_argument(
         '--init-synchronous-commit',
-        choices=('off', 'local', 'keep'),
-        default='off',
-        help='commit policy in every common-loader connection',
+        choices=('keep', 'off', 'local'),
+        default='keep',
+        help='loader commit policy: keep preserves defaults; off/local opt into faster loading',
     )
     benchmark.add_argument('--workload-command')
     benchmark.add_argument(
@@ -250,7 +255,13 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument(
         '--allow-database-reset',
         action='store_true',
-        help='confirm that the selected benchmark database may be dropped and recreated',
+        help='authorize resetting the selected database or its profile schemas (--reset-mode)',
+    )
+    benchmark.add_argument(
+        '--reset-mode',
+        choices=('database', 'schema'),
+        default='database',
+        help='database: recreate the database; schema: reset profile schemas in an existing DB',
     )
     benchmark.add_argument(
         '--drop-os-caches',
@@ -373,6 +384,8 @@ def capabilities() -> dict[str, Any]:
                 'machine_output': True,
                 'accepts_plan_hash': True,
                 'managed_pg_info_option': '--managed-pg-info',
+                'managed_option': '--managed',
+                'reset_modes': ['database', 'schema'],
             },
             'collect-sys-info': {
                 'mutates_target': False,

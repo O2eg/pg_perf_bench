@@ -11,6 +11,7 @@ import importlib.util
 import json
 import sys
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,7 +51,7 @@ class LoadOptions:
     batch_rows: int = 100_000
     table_mode: str = 'unlogged'
     fsync: str = 'off'
-    synchronous_commit: str = 'off'
+    synchronous_commit: str = 'keep'
     timeout: float = 300.0
 
     @classmethod
@@ -60,7 +61,7 @@ class LoadOptions:
             batch_rows=int(config.get('init_batch_rows', 100_000)),
             table_mode=config.get('init_table_mode', 'unlogged'),
             fsync=config.get('init_fsync', 'off'),
-            synchronous_commit=config.get('init_synchronous_commit', 'off'),
+            synchronous_commit=config.get('init_synchronous_commit', 'keep'),
             timeout=float(config.get('command_timeout', 300.0)),
         )
 
@@ -73,15 +74,53 @@ def qualified_name(schema: str, name: str) -> str:
     return quote_identifier(schema) + '.' + quote_identifier(name)
 
 
+def profile_search_path(plan: LoadPlan) -> str:
+    return ', '.join(quote_identifier(schema) for schema in plan.schemas) + ', public'
+
+
 def connection_kwargs(db_conf: dict[str, Any], options: LoadOptions) -> dict[str, Any]:
     kwargs = {key: value for key, value in db_conf.items() if key != 'connect_timeout'}
     kwargs['timeout'] = float(db_conf.get('connect_timeout', 5))
     kwargs['command_timeout'] = options.timeout
     settings = {**kwargs.get('server_settings', {}), 'application_name': 'pg_perf_bench:init'}
-    if options.synchronous_commit != 'keep':
-        settings['synchronous_commit'] = options.synchronous_commit
     kwargs['server_settings'] = settings
     return kwargs
+
+
+@asynccontextmanager
+async def loader_connection(db_conf, options: LoadOptions, *, search_path=None):
+    """Set SQL session options explicitly and restore them before returning to a pool."""
+    db = await asyncpg.connect(**connection_kwargs(db_conf, options))
+    original = {}
+
+    async def cleanup():
+        try:
+            if not db.is_closed():
+                for name, value in original.items():
+                    await db.execute('SELECT pg_catalog.set_config($1, $2, false)', name, value)
+        finally:
+            await db.close()
+
+    try:
+        settings = {}
+        if options.synchronous_commit != 'keep':
+            settings['synchronous_commit'] = options.synchronous_commit
+        if search_path is not None:
+            settings['search_path'] = search_path
+        for name, value in settings.items():
+            original[name] = await db.fetchval('SELECT pg_catalog.current_setting($1)', name)
+            await db.execute('SELECT pg_catalog.set_config($1, $2, false)', name, value)
+            actual = await db.fetchval('SELECT pg_catalog.current_setting($1)', name)
+            if actual != value:
+                raise ConfigurationError(f'Loader session did not apply {name}={value!r}')
+        yield db
+    finally:
+        task = asyncio.create_task(cleanup())
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            await task
+            raise
 
 
 def read_sql_tasks(path: Path) -> tuple[LoadTask, ...]:
@@ -214,9 +253,7 @@ async def run_tasks(
             return None
 
     async def worker():
-        db = await asyncpg.connect(**connection_kwargs(db_conf, options))
-        try:
-            await db.execute('SELECT set_config($1, $2, false)', 'search_path', search_path)
+        async with loader_connection(db_conf, options, search_path=search_path) as db:
             while (job := await take()) is not None:
                 state, params = job
                 started = time.monotonic()
@@ -257,8 +294,6 @@ async def run_tasks(
                         )
                         state.last_progress = time.monotonic()
                     changed.notify_all()
-        finally:
-            await db.close()
 
     workers = [asyncio.create_task(worker()) for _ in range(options.workers)]
     try:
@@ -285,9 +320,10 @@ async def prepare_database(
     """Execute the common phases; the caller owns temporary server settings."""
     validate_plan(plan)
     result: dict[str, Any] = {'started_at': datetime.now(timezone.utc).isoformat(), 'phases': []}
-    search_path = ', '.join(quote_identifier(schema) for schema in plan.schemas) + ', public'
-    db = await asyncpg.connect(**connection_kwargs(db_conf, options))
-    try:
+    search_path = profile_search_path(plan)
+    result['schemas'] = list(plan.schemas)
+    result['search_path'] = search_path
+    async with loader_connection(db_conf, options, search_path=search_path) as db:
 
         async def statement(phase, sql):
             if not sql.strip():
@@ -365,9 +401,18 @@ async def prepare_database(
                 'vacuum:' + table['name'],
                 f'VACUUM (FREEZE, ANALYZE) {qualified_name(table["schema"], table["name"])}',
             )
-        await statement('analyze', 'ANALYZE')
-    finally:
-        await db.close()
+        # Include storage-free partitioned parents, but never analyze unrelated schemas.
+        relations = await db.fetch(
+            'SELECT n.nspname AS schema, c.relname AS name FROM pg_class c '
+            'JOIN pg_namespace n ON n.oid=c.relnamespace '
+            "WHERE n.nspname=ANY($1::text[]) AND c.relkind IN ('r', 'm', 'p') ORDER BY c.oid",
+            list(plan.schemas),
+        )
+        if relations:
+            await statement(
+                'analyze',
+                '; '.join('ANALYZE ' + qualified_name(r['schema'], r['name']) for r in relations),
+            )
     result['finished_at'] = datetime.now(timezone.utc).isoformat()
     return result
 

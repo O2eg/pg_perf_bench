@@ -22,6 +22,13 @@ def test_scheduler_bounds_transactions_and_resolves_reverse_zero_dependencies():
         def __init__(self):
             self.job = None
             self.closed = False
+            self.settings = {'search_path': '"$user", public'}
+
+        def is_closed(self):
+            return self.closed
+
+        async def fetchval(self, sql, name):
+            return self.settings[name]
 
         @asynccontextmanager
         async def transaction(self):
@@ -35,7 +42,8 @@ def test_scheduler_bounds_transactions_and_resolves_reverse_zero_dependencies():
                 active -= 1
 
         async def execute(self, sql, *params):
-            if sql.startswith('SELECT set_config'):
+            if sql.startswith('SELECT pg_catalog.set_config'):
+                self.settings[params[0]] = params[1]
                 return 'SELECT 1'
             self.job = (sql, params)
             if sql == 'index':
@@ -47,7 +55,7 @@ def test_scheduler_bounds_transactions_and_resolves_reverse_zero_dependencies():
             self.closed = True
 
     async def connect(**kwargs):
-        assert kwargs['server_settings']['synchronous_commit'] == 'off'
+        assert 'synchronous_commit' not in kwargs['server_settings']
         conn = Connection()
         sessions.append(conn)
         return conn

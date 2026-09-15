@@ -18,4 +18,4 @@ Example selection (connection and safety arguments omitted):
 
 `pg-perf-bench benchmark --workload-profile pagila-htap --workload-scale 4 --pgbench-clients 1,2,4,8,16,32`
 
-Use a dedicated disposable database; the benchmark recreates it before every point.
+Use a dedicated disposable database; the benchmark resets the database or profile schemas before every point.

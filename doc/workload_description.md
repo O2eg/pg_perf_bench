@@ -15,8 +15,8 @@ Values are comma-separated positive integers. The CLI does not automatically
 add `-c`, `-T`, or any other pgbench flag; the command template decides how the
 axis value is used.
 
-Every axis value is a separate destructive iteration with a freshly recreated
-database.
+Every axis value is a separate destructive iteration with a fresh dataset,
+using database recreation or profile schema reset.
 
 After `init_command`, the runner executes `VACUUM ANALYZE` and collects the
 **Before workload** size snapshot. It then runs the measured command, waits for
@@ -97,7 +97,7 @@ pg-perf-bench benchmark \
 
 The profiles do not use or copy `pg_workload`'s `profile.yml`. That file
 describes continuous scheduling in `pg_workload`; `pg_perf_bench` instead
-recreates the database for each concurrency point and measures maximum TPS.
+resets the dataset for each concurrency point and measures maximum TPS.
 
 ## Command timeout
 
@@ -163,11 +163,12 @@ marked partial.
 
 ## Reproducibility checklist
 
-With `--managed-pg-info FILE`, the benchmark runs through the PostgreSQL endpoint
-without a host transport or server paths. Database recreation and workload
-execution remain enabled; service restarts, filesystem/cache operations, OS
+With `--managed`, the benchmark runs through the PostgreSQL endpoint
+without a host transport or server paths. Use `--reset-mode schema --init-fsync keep`
+for a pre-created database without CREATEDB or access to postgres. Workload
+execution remains enabled; service restarts, filesystem/cache operations, OS
 sampling and server log collection are disabled. Their report items contain
-`No data. Managed PostgreSQL.` with status `unsupported`. The metadata file is
+`No data. Managed PostgreSQL.` with status `unsupported`. An optional `--managed-pg-info FILE` also implies `--managed`; its content is
 embedded intact and displayed directly as `plain_text`; binary content is stored
 and displayed as Base64 with an encoding note. See the README's **Managed
 PostgreSQL** example for required permissions and connection settings.

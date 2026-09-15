@@ -81,7 +81,9 @@ intentional variable and operator workflow:
 The CLI accepts a packaged scenario id. `pg-perf-bench join-tasks` lists the
 catalog. Available scenarios cover DB
 configuration optimization, CPU and memory scaling, storage comparison,
-OS/kernel tuning, PostgreSQL major-version comparison and strict repeatability.
+OS/kernel tuning, PostgreSQL major-version comparison, deployment comparison and
+strict repeatability. `compare-deployments` supports the [managed/Patroni paired-run
+workflow](managed_mode_usage.md#compare-managed-postgresql-and-patroni).
 Run `pg-perf-bench validate` to verify every task and its README.
 
 Choose comparison items that define the controlled environment. Do not include

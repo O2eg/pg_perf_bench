@@ -21,7 +21,7 @@ import asyncpg
 
 from pg_perf_bench.const import ConnectionType
 from pg_perf_bench.errors import ConfigurationError
-from pg_perf_bench.initialization import LoadOptions, connection_kwargs, prepare_database
+from pg_perf_bench.initialization import LoadOptions, loader_connection, prepare_database
 
 _LOCK = (1346847301, 1229867348)
 _STATE_DIR = Path.home() / '.cache/pg_perf_bench/initialization'
@@ -37,6 +37,7 @@ class InitializationSettings:
         connection,
         *,
         state_dir: Path | None = None,
+        control_database: str = 'postgres',
     ):
         self.logger = logger
         self.db_conf = db_conf
@@ -44,7 +45,10 @@ class InitializationSettings:
         self.connection_type = connection_type
         self.connection = connection
         self.state_dir = state_dir or _STATE_DIR
+        self.control_database = control_database
         self.db = None
+        self.session = None
+        self.lock_acquired = False
         self.state_path = None
         self.identity = None
         self.original = None
@@ -154,8 +158,7 @@ class InitializationSettings:
         return any(_STATE_DIR.glob('*.json'))
 
     async def open(self, *, recover_only=False):
-        kwargs = connection_kwargs({**self.db_conf, 'database': 'postgres'}, self.options)
-        self.db = await asyncpg.connect(**kwargs)
+        await self._connect()
         try:
             if await self.db.fetchval('SELECT pg_is_in_recovery()'):
                 raise ConfigurationError('Fast initialization requires a primary PostgreSQL server')
@@ -163,6 +166,7 @@ class InitializationSettings:
                 raise ConfigurationError(
                     "Another initialization is changing this primary's settings"
                 )
+            self.lock_acquired = True
             is_superuser = await self.db.fetchval("SELECT current_setting('is_superuser')::boolean")
             pending_recovery = any(self.state_dir.glob('*.json'))
             if pending_recovery and not is_superuser:
@@ -213,11 +217,40 @@ class InitializationSettings:
                     # Confirm host access before altering any setting or resetting the database.
                     await self._sync()
             if not recover_only:
-                self.replicas = await self._replica_keys()
+                try:
+                    self.replicas = await self._replica_keys()
+                    # Check WAL-function permissions before resetting/loading, not at the barrier.
+                    await self.db.fetchval('SELECT pg_current_wal_insert_lsn()::text')
+                    await self.db.fetchval('SHOW fsync')
+                except asyncpg.InsufficientPrivilegeError as exc:
+                    raise ConfigurationError(
+                        'Replica readiness requires access to replication statistics and WAL '
+                        'functions; grant monitoring privileges using the provider controls '
+                        f'or PostgreSQL roles before loading data: {exc}'
+                    ) from exc
         except BaseException:
-            await self.db.close()
-            self.db = None
+            await self._disconnect()
             raise
+
+    async def _connect(self):
+        self.session = loader_connection(
+            {**self.db_conf, 'database': self.control_database}, self.options
+        )
+        self.db = await self.session.__aenter__()
+
+    async def _disconnect(self):
+        try:
+            if self.lock_acquired and self.db is not None and not self.db.is_closed():
+                # Closing a client need not close its pooled PostgreSQL backend.
+                await self.db.fetchval('SELECT pg_advisory_unlock($1, $2)', *_LOCK)
+        finally:
+            self.lock_acquired = False
+            try:
+                if self.session is not None:
+                    await self.session.__aexit__(None, None, None)
+            finally:
+                self.db = None
+                self.session = None
 
     async def disable(self):
         if self.options.fsync == 'keep':
@@ -240,11 +273,11 @@ class InitializationSettings:
         if not self.changed:
             return
         if self.db.is_closed():
-            self.db = await asyncpg.connect(
-                **connection_kwargs({**self.db_conf, 'database': 'postgres'}, self.options)
-            )
+            await self._disconnect()
+            await self._connect()
             if not await self.db.fetchval('SELECT pg_try_advisory_lock($1, $2)', *_LOCK):
                 raise RuntimeError('Cannot recover fsync: another initialization holds the lock')
+            self.lock_acquired = True
         if await self.db.fetchval('SELECT pg_is_in_recovery()') or self._member_identity(
             await self._identity()
         ) != self._member_identity(self.identity):
@@ -289,7 +322,8 @@ class InitializationSettings:
         if any(row['state'] is None for row in rows):
             raise ConfigurationError(
                 'Replica readiness requires visibility of pg_stat_replication; '
-                'grant pg_read_all_stats or pg_monitor to the benchmark role'
+                'grant pg_read_all_stats/pg_monitor or equivalent provider monitoring privileges '
+                'to the benchmark role before loading data'
             )
         # Physical slots survive reconnections from a new address. Without a
         # slot, retain counts for replicas sharing an application name behind NAT.
@@ -321,15 +355,24 @@ class InitializationSettings:
         try:
             await self.restore()
         finally:
-            if self.db is not None:
-                await self.db.close()
+            await self._disconnect()
 
 
 async def initialize_database(
-    logger, plan, db_conf, options, connection_type, connection, *, required_replicas=None
+    logger,
+    plan,
+    db_conf,
+    options,
+    connection_type,
+    connection,
+    *,
+    required_replicas=None,
+    settings=None,
 ):
-    settings = InitializationSettings(logger, db_conf, options, connection_type, connection)
-    await settings.open()
+    owns_settings = settings is None
+    if owns_settings:
+        settings = InitializationSettings(logger, db_conf, options, connection_type, connection)
+        await settings.open()
     try:
         settings.replicas |= required_replicas or Counter()
         await settings.disable()
@@ -344,11 +387,15 @@ async def initialize_database(
         evidence['finished_at'] = datetime.now(timezone.utc).isoformat()
         return evidence
     finally:
-        # A cancellation must not leave fsync disabled. The journal remains if
-        # the original primary is unreachable and restoration cannot complete.
-        cleanup = asyncio.create_task(settings.close())
-        try:
-            await asyncio.shield(cleanup)
-        except asyncio.CancelledError:
-            await cleanup
-            raise
+        if owns_settings:
+            await close_initialization_settings(settings)
+
+
+async def close_initialization_settings(settings):
+    # Restore fsync/release the session lock even when the caller is cancelled.
+    cleanup = asyncio.create_task(settings.close())
+    try:
+        await asyncio.shield(cleanup)
+    except asyncio.CancelledError:
+        await cleanup
+        raise

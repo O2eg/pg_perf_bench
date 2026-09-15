@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import asyncpg
 
 from pg_perf_bench.report.commands import run_sql_command
+from pg_perf_bench.session_settings import close_diagnostic_connection
 
 
 def _connection_kwargs(db_conf):
@@ -129,7 +130,7 @@ async def collect_storage_snapshot(logger, db_conf):
             for name in ('table_sizes', 'index_sizes'):
                 await run_sql_command(logger, db, snapshot['reports'][name])
         finally:
-            await db.close()
+            await close_diagnostic_connection(db)
     # These are captured results, never commands for the final monitoring pass to rerun.
     for item in snapshot['reports'].values():
         item.pop('sql_command_file', None)

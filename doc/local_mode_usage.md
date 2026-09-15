@@ -72,7 +72,8 @@ PGPASSWORD=secret pg-perf-bench benchmark \
   --report-name local-pg18
 ```
 
-For every iteration the selected database is dropped and recreated. System
+With the default `--reset-mode database`, each iteration recreates the selected database.
+`--reset-mode schema --init-fsync keep` instead resets profile schemas without a restart. System
 databases are always rejected, but every other database is treated as
 disposable after `--allow-database-reset` is supplied.
 

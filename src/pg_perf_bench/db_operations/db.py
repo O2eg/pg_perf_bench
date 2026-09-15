@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -17,11 +18,78 @@ def quote_ident(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
 
 
+def validate_reset_schemas(schemas) -> None:
+    if not schemas or any(
+        not isinstance(schema, str)
+        or not schema
+        or '\x00' in schema
+        or len(schema.encode('utf-8')) > 63
+        or schema.lower() in {'public', 'information_schema'}
+        or schema.lower().startswith('pg_')
+        for schema in schemas
+    ):
+        raise ConfigurationError(
+            'Schema reset requires explicitly named, non-system profile schemas'
+        )
+    if len(set(schemas)) != len(schemas):
+        raise ConfigurationError('Schema reset requires distinct schema names')
+
+
 class DBTasks:
     def __init__(self, db_conf: dict[str, Any], logger):
         self.db_conf = db_conf
         self.logger = logger
         self.connect_timeout = float(db_conf.get('connect_timeout', 5.0))
+
+    async def check_schema_reset(self, connection, schemas, *, table_mode: str) -> None:
+        self._validate_disposable_database()
+        validate_reset_schemas(schemas)
+        if await connection.fetchval('SHOW transaction_read_only') != 'off':
+            raise ConfigurationError('Schema reset requires a read-write primary connection')
+        if not await connection.fetchval(
+            "SELECT has_database_privilege(current_database(), 'CREATE')"
+        ):
+            raise ConfigurationError(
+                'Schema reset requires CREATE privilege on the target database'
+            )
+        unowned = await connection.fetch(
+            'SELECT nspname FROM pg_namespace WHERE nspname=ANY($1::text[]) '
+            "AND NOT pg_has_role(nspowner, 'USAGE')",
+            list(schemas),
+        )
+        if unowned:
+            raise ConfigurationError(
+                'Schema reset requires ownership of: '
+                + ', '.join(row['nspname'] for row in unowned)
+            )
+        # Probe DDL/conversion permissions without touching any existing schema.
+        probe = quote_ident('bench_probe_' + uuid.uuid4().hex)
+        transaction = connection.transaction()
+        await transaction.start()
+        try:
+            await connection.execute(
+                f'CREATE SCHEMA {probe}; CREATE TABLE {probe}.probe (id bigint)'
+            )
+            if table_mode == 'unlogged':
+                await connection.execute(f'ALTER TABLE {probe}.probe SET UNLOGGED')
+                await connection.execute(f'ALTER TABLE {probe}.probe SET LOGGED')
+        finally:
+            await transaction.rollback()
+
+    async def reset_schemas(self, connection, schemas, *, timeout: float) -> None:
+        self._validate_disposable_database()
+        validate_reset_schemas(schemas)
+        self.logger.info('Resetting profile schemas in %r: %s.', self.db_conf['database'], schemas)
+        async with connection.transaction():
+            await connection.execute(
+                'SELECT set_config($1, $2, true)',
+                'lock_timeout',
+                str(min(2147483647, max(1, int(timeout * 1000)))),
+            )
+            await connection.execute(
+                'DROP SCHEMA IF EXISTS ' + ', '.join(quote_ident(s) for s in schemas) + ' CASCADE',
+                timeout=timeout,
+            )
 
     def _connection_kwargs(self, database: str) -> dict[str, Any]:
         return {

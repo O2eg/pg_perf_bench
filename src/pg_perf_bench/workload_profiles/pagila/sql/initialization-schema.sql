@@ -28,7 +28,6 @@ SET row_security = off;
 
 -- *not* creating schema, since initdb creates it
 
-DROP SCHEMA IF EXISTS pagila CASCADE;
 
 CREATE SCHEMA pagila;
 

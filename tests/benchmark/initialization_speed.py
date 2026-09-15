@@ -67,6 +67,9 @@ def parse_args(argv=None):
     parser.add_argument('--workers', type=positive_integer, default=4)
     parser.add_argument('--batch-rows', type=positive_integer, default=100_000)
     parser.add_argument(
+        '--init-synchronous-commit', choices=('keep', 'off', 'local'), default='keep'
+    )
+    parser.add_argument(
         '--timeout',
         type=positive_number,
         default=1800,
@@ -147,7 +150,12 @@ def wait_ready(container):
 
 async def run(primary, conf, args, root, disk_path):
     target = args.target_gib * 1024**3
-    options = LoadOptions(workers=args.workers, batch_rows=args.batch_rows, timeout=args.timeout)
+    options = LoadOptions(
+        workers=args.workers,
+        batch_rows=args.batch_rows,
+        timeout=args.timeout,
+        synchronous_commit=args.init_synchronous_commit,
+    )
     transport = DockerConnection({'container_name': primary.name}, {})
     await transport.start()
     admin = None

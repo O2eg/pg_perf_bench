@@ -404,6 +404,7 @@ def build_workload_evidence(
             'iteration_values': pgbench['iteration_values'],
             'workload_duration_seconds': workload_conf.get('workload_duration_seconds'),
             'initialization': initialization,
+            'reset_mode': workload_conf.get('reset_mode', 'database'),
         }
     )
     return {

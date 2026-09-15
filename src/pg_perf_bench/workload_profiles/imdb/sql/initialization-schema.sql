@@ -1,4 +1,3 @@
-DROP SCHEMA IF EXISTS imdb CASCADE;
 
 create schema imdb;
 

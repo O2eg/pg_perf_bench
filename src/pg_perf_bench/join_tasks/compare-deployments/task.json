@@ -1,0 +1,15 @@
+{
+  "schema_version": "pg_perf_bench/join-task-v1",
+  "id": "compare-deployments",
+  "title": "Compare PostgreSQL deployments",
+  "purpose": "Compare managed PostgreSQL and self-managed deployments with the same workload and preparation policy.",
+  "controlled_dimensions": ["workload", "pgbench_parameters", "initialization_policy", "reset_policy", "load_generator"],
+  "variable_dimensions": ["deployment", "hardware", "postgresql_configuration", "replication", "pooling"],
+  "items": [
+    "workload_evidence.execution_hash",
+    "environment_evidence.load_generator_hash",
+    "benchmark_methodology.reset_mode",
+    "benchmark_methodology.server_restarted_before_each_iteration",
+    "benchmark_methodology.os_caches_dropped_before_each_iteration"
+  ]
+}

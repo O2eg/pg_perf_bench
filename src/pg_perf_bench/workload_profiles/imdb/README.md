@@ -23,14 +23,13 @@ the generated values. `--init-mode legacy` preserves the command-based initializ
 
 Script cost ranges from a few milliseconds to about two seconds per transaction at scale 1,
 so the measured window defaults to 120 seconds (`--workload-duration-seconds` overrides it)
-and pgbench runs with `--random-seed=42`: every iteration and every compared report executes
-the same script sequence, which removes mix-composition noise from A/B comparisons. Without
-the fixed seed two identical 30-second runs differed by about 7 %; with it they agree within
-1 %.
+and pgbench runs with `--random-seed=42`. The seed makes random choices repeatable with
+the same client configuration. Timed runs can complete different numbers of scripts;
+the seed does not guarantee identical observed mix proportions or TPS.
 
 Example selection (connection and safety arguments omitted):
 
 `pg-perf-bench benchmark --workload-profile imdb --workload-scale 1 --pgbench-clients 1,2,4,8,16`
 
-Use a dedicated disposable database. The benchmark recreates it before every point in the
+Use a dedicated disposable database. The benchmark resets the database or profile schemas before every point in the
 client sweep, so every point receives the same generated data and indexes.

@@ -31,7 +31,7 @@ required.
 
 The CLI supports three groups of workflows:
 
-- `benchmark` recreates a dedicated database before every measured iteration,
+- `benchmark` resets a dedicated database or its profile schemas before every measured iteration,
   initializes the workload, runs it, and collects final host/database facts;
 - `collect-sys-info`, `collect-db-info`, and `collect-all-info` gather evidence
   without running a workload;
@@ -66,7 +66,7 @@ selected target. The workload commands themselves run on the machine where
 | `local` | local machine | local machine |
 | `docker` | existing container | local machine through a published port |
 | `ssh` | remote host | local machine through an SSH local-forwarding port |
-| `--managed-pg-info FILE` | PostgreSQL protocol only; no host transport | local machine through the managed endpoint |
+| `--managed` | PostgreSQL protocol only; no host transport | local machine through the managed endpoint |
 
 This separation keeps workload generation independent of target management and
 makes the measured client location explicit.
@@ -80,24 +80,43 @@ Python 3.10 or newer is required. Create a virtual environment and install the p
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install .
+.venv/bin/python -m pip install pg-perf-bench
 .venv/bin/pg-perf-bench --version
 ```
 
-For development:
+To install a source checkout, use `pip install .` from its root. For development:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install -e ../pg_diag -e '.[dev]'
+.venv/bin/python -m pip install -e '.[dev]'
 .venv/bin/ruff check src tests
 .venv/bin/python -m pytest
 ```
 
-The source checkout is needed until the minimum supported `pg_diag` release is
-available from the configured package index. For a PyPI release, publish
-`pg_diag` and `pg_stand` first; the tagged build intentionally verifies those
-declared dependencies from the package index before publishing
-`pg_perf_bench`.
+For coordinated local changes to `pg_diag`, also install its checkout with
+`pip install -e ../pg_diag`. The tagged release build verifies declared
+dependencies from the package index before publishing `pg_perf_bench`.
+
+### Installed documentation
+
+The wheel and source distribution include this README, `INITIALIZATION.md`, all
+guides in `doc/`, and the workload-profile and JOIN-scenario READMEs. The installed
+guides include managed PostgreSQL setup, Patroni behavior, initialization settings,
+and examples comparing deployments with replicas. Relative Markdown links work
+within the installed package; no repository checkout is needed to read the guides.
+
+Find the installed documentation with the Python interpreter used for installation:
+
+```bash
+.venv/bin/python -c 'from importlib.resources import files; print(files("pg_perf_bench").joinpath("docs", "README.md"))'
+```
+
+Open that file with a Markdown viewer, or follow `docs/doc/README.md` for the guide
+index. Profile and JOIN READMEs are under `pg_perf_bench/workload_profiles/` and
+`pg_perf_bench/join_tasks/`. The manual loader benchmark guide is included at
+`docs/tests/benchmark/README.md`; running its test harness requires a source checkout.
+
+### PostgreSQL client and host requirements
 
 `pgbench` and `psql` must be installed on the workload-generator host.
 `pg_perf_bench` discovers every client below `/usr/lib/postgresql/*/bin` and in
@@ -151,8 +170,9 @@ Collection:
 
 Benchmark:
 
-- terminates sessions connected to the selected benchmark database;
-- drops and recreates that database from `template0` before every iteration;
+- in database reset mode, terminates sessions connected to the selected benchmark database;
+- with `--reset-mode database` (default), recreates the database from `template0` each iteration;
+- with `--reset-mode schema`, resets profile schemas in an existing database without a restart;
 - refuses `postgres`, `template0`, and `template1`;
 - requires the explicit `--allow-database-reset` confirmation;
 - drops OS filesystem caches only when `--drop-os-caches` is supplied;
@@ -291,7 +311,7 @@ several SQL statements or transactions. The default HTAP reporting share is
 | Setting | How to configure it |
 |---|---|
 | Data volume | `--workload-scale SCALE`, default `1`; positive fractional values such as `0.25` are accepted. Generators retain minimum table sizes at small scales. |
-| Concurrent clients | `--pgbench-clients 1,2,4,8,16`; each value gets a freshly recreated database. Bundled commands also use one pgbench job per client. |
+| Concurrent clients | `--pgbench-clients 1,2,4,8,16`; each value gets a fresh dataset using the selected reset mode. Bundled commands also use one pgbench job per client. |
 | Measured window per point | `--workload-duration-seconds 120`; overrides the profile default for every client count. |
 | Command time limit | `--command-timeout 300`; allow enough time for initialization, pre-workload `VACUUM ANALYZE`, and the workload window plus completion of in-flight queries. |
 
@@ -328,8 +348,8 @@ being tested; the profile READMEs describe the datasets in more detail.
 The schemas support PostgreSQL 10–18. Generators use deterministic `hashint8()`
 streams; IMDb uses separate streams for related identifiers and attributes to
 avoid correlated, degenerate joins. Pagila initializes indexes, identifier
-bounds and statistics, and sets `search_path` for the database and the benchmark
-role within it. No manual role configuration is needed for the supplied commands.
+bounds and statistics. The common initializer supplies `search_path` in loader
+and pgbench connection settings; legacy Pagila setup uses database/role defaults. No manual role configuration is needed for the supplied commands.
 Generated values are reproducible; service timestamps such as Pagila's
 `last_update` use the current time.
 
@@ -343,8 +363,10 @@ scheduler-specific `profile.yml`.
 ### Fast initialization
 
 Bundled profiles default to the [common initializer](INITIALIZATION.md): four workers,
-100,000 rows per data batch, UNLOGGED tables, temporary primary `fsync=off` and
-`synchronous_commit=off` in every loader connection. After loading it restores LOGGED
+100,000 rows per data batch, UNLOGGED tables and temporary primary `fsync=off`.
+`--init-synchronous-commit keep` preserves the loader session commit policy by default.
+Explicit `--init-synchronous-commit off` or `local` speeds preparation by removing
+synchronous replica acknowledgement waits; `off` also skips local WAL flush waits. After loading it restores LOGGED
 tables, builds indexes in parallel, validates constraints and runs VACUUM ANALYZE.
 It then restores fsync, checkpoints, synchronizes host files and waits for directly
 connected replicas to replay initialization WAL before pgbench starts.
@@ -465,11 +487,23 @@ generator and supporting files, and **pgbench workload** for workload SQL.
 
 ### Managed PostgreSQL
 
-Pass `--managed-pg-info FILE` to benchmark an instance whose operating system
+Pass `--managed` to benchmark an instance whose operating system
 and PostgreSQL service are controlled by a cloud provider. The option selects
 managed mode automatically; `--connection-type`, `--pg-data-path` and
 `--pg-bin-path` are not required. The local `pgbench` and `psql` clients still
 need to be installed.
+
+Use `--reset-mode schema --init-fsync keep` with a **pre-created dedicated database**
+when the provider does not permit `CREATE DATABASE` or access to `postgres`.
+The utility resets only the schemas declared by the common load plan before each
+iteration and connects to the target database for all preparation and workload
+operations. Pagila, Pagila-HTAP, IMDb and custom common-load-plan profiles support
+this mode. It requires CREATE privilege on the database and ownership of existing
+profile schemas; it does not require SUPERUSER or CREATEDB.
+
+`--managed-pg-info FILE` optionally adds instance metadata and also implies
+`--managed` for compatibility with existing commands. The file is not required
+to enable managed mode.
 
 The metadata file can have **any format**: JSON, YAML, plain text, PDF, an image
 or another binary format. Its format is not parsed or used to configure the
@@ -484,9 +518,9 @@ For example:
 
 ```bash
 PGPASSWORD=secret PGSSLMODE=require pg-perf-bench benchmark \
-  --managed-pg-info ./cloud-instance.yaml --init-fsync keep \
+  --managed --managed-pg-info ./cloud-instance.yaml --init-fsync keep \
   --host db.example.cloud --port 5432 --user bench_owner \
-  --database pg_perf_bench_test --allow-database-reset \
+  --database pg_perf_bench_test --allow-database-reset --reset-mode schema \
   --workload-profile pagila-htap --workload-scale 0.1 \
   --workload-duration-seconds 30 --pgbench-clients 1,2,4 \
   --command-timeout 120 --report-name managed-pagila
@@ -497,10 +531,28 @@ apply to the database connections and local client tools.
 
 Managed mode measures TPS, latency, transaction counts and client connection
 time, retains the complete workload evidence, and collects PostgreSQL version,
-settings and extensions through SQL using the supplied role. It recreates the
-dedicated benchmark database before each iteration, so the role needs
+settings and extensions through SQL using the supplied role. The default
+`--reset-mode database` retains database recreation before each iteration and requires
 `CREATEDB`, access to the `postgres` maintenance database and ownership of the
 benchmark database. `--allow-database-reset` remains mandatory.
+
+Schema reset requires the common fast initializer and `--init-fsync keep`. It
+preserves database ownership, privileges and permanent role/database settings;
+the fast loader and pgbench receive `search_path` through their connection settings.
+The next run resets the profile schemas again; the final dataset remains available
+for inspection. `DROP SCHEMA ... CASCADE` can remove dependent objects outside those
+schemas, so use a dedicated database without application dependencies.
+
+Use a direct connection or **compatible session pooling**. Odyssey requires
+`smart_search_path_enquoting=yes` and `pool_discard=yes` for pgbench; schema mode
+checks libpq startup options and prepared statements before reset. Loader overrides use SQL and are restored before returning
+connections to the pool. Transaction/statement pooling is
+not supported by the session lock and loader settings. Replica statistics and
+WAL-function permissions are checked before reset; directly connected physical
+replicas must replay the preparation WAL before pgbench starts. Missing monitoring
+privileges stop the run rather than bypassing that wait. See the
+[managed guide](doc/managed_mode_usage.md) for setup and expected report limitations,
+including [paired managed/Patroni runs with replicas](doc/managed_mode_usage.md#compare-managed-postgresql-and-patroni).
 
 The utility does not restart the server, flush filesystems, drop OS caches,
 install `postgresql.conf`, read server logs or run the OS sampler. Host facts,
@@ -509,12 +561,13 @@ OS metrics, `PostgreSQL pg_config` and server logs explicitly show
 `unsupported`; actual SQL or workload failures remain errors. Managed mode
 cannot be combined with SSH/Docker transport, `--pg-custom-config` or
 `--drop-os-caches`. `--collect-pg-logs` retains the unavailable-data marker.
-Custom workload commands execute exactly as supplied and must themselves be
+Custom workload commands execute as supplied and must themselves be
 compatible with the provider's permissions.
 
 ### Iteration lifecycle
 
-For each axis value in the regular mode without Patroni, the backend:
+For each axis value with `--reset-mode database`, host access and no Patroni,
+the backend:
 
 1. verifies access to the PostgreSQL instance;
 2. drops the dedicated benchmark database;
@@ -534,10 +587,16 @@ After the final iteration it collects the configured host and PostgreSQL facts
 and optionally archives PostgreSQL logs under `<output-dir>/db_logs/`, alongside
 the JSON and HTML report artifacts.
 
+With `--reset-mode schema`, the backend recreates only the profile schemas in an
+existing database and continues with initialization and measurement. It does not
+drop/create the database or restart PostgreSQL. With `--managed`, collection is
+limited to SQL evidence and the workload-generator environment.
+
 ### Patroni
 
-Benchmark mode automatically detects a running Patroni process on the selected
-Linux database host (local, SSH, or Docker). It matches Patroni's `postgresql.data_dir`
+With host access and `--reset-mode database`, benchmark mode automatically detects
+a running Patroni process on the selected Linux database host (local, SSH, or Docker).
+It matches Patroni's `postgresql.data_dir`
 to `--pg-data-path`, including symlinks. Merely installing `patronictl` does not
 select this mode. The host account must be able to read the Patroni process's
 `/proc` entries, environment and configuration; use the Patroni OS account or root.
@@ -563,8 +622,9 @@ the client certificate and key. Server trust comes from `ctl.cacert` or
 `restapi.cafile`. The server's `restapi.certfile`/`restapi.keyfile` are not used as
 client credentials. All referenced files must be readable by the Patroni OS account.
 
-Before each iteration, the utility checks that SQL reaches the detected primary,
-drops the benchmark database, flushes filesystems, and requests a synchronous
+With `--reset-mode database`, before each iteration the utility checks that SQL
+reaches the detected primary, drops the benchmark database, flushes filesystems,
+and requests a synchronous
 [`POST /restart`](https://patroni.readthedocs.io/en/latest/rest_api.html#restart-endpoint)
 on that member. It then waits for SQL access, verifies that the PostgreSQL start
 time changed, and recreates the benchmark database. Patroni and the Docker
@@ -580,7 +640,7 @@ With Patroni, `--pg-custom-config` and `--drop-os-caches` are rejected before
 changing the database or uploading a configuration. Apply PostgreSQL settings
 through Patroni before the run. OS cache dropping requires PostgreSQL to remain
 stopped, which the Patroni restart API does not provide. Managed PostgreSQL mode
-continues to skip host lifecycle operations entirely.
+continues to skip Patroni detection and host lifecycle operations entirely.
 
 The opt-in integration test provisions a separate `pg_stand` container, installs
 Patroni and etcd, reproduces the `pg_ctl` race, and runs Docker, SSH, and local
@@ -751,7 +811,7 @@ items for **every iteration**:
 | Before workload | All database sizes; top 100 tables by total size; top 100 indexes by size |
 | After workload | All database sizes; top 100 tables by total size; top 100 indexes by size |
 
-The order is: recreate the workload database → initialize → run
+The order is: reset the workload database or profile schemas → initialize → run
 `VACUUM ANALYZE` → restore loader settings and wait for replicas in fast mode →
 collect **Before workload** → run `pgbench` → finish any
 remaining OS sampling → collect **After workload**. Preparation and size collection
@@ -781,7 +841,7 @@ Every snapshot records its collection interval in JSON and HTML. Measurements
 are sequential, so concurrent activity can change sizes during collection.
 SQL statements have a 10-second timeout; errors remain explicit in the report.
 Snapshots are retained in `benchmark_runs[].storage` before the next iteration
-recreates the database. JOIN preserves all source snapshots and identifies older
+resets the database or profile schemas. JOIN preserves all source snapshots and identifies older
 reports that did not collect them. PostgreSQL 10–18 and managed PostgreSQL use
 the same SQL collection path.
 
@@ -855,7 +915,8 @@ missing, invalid, or structurally incompatible reference fails the operation.
 `pg-perf-bench join-tasks` lists the packaged JOIN catalog of separately
 documented practical scenarios:
 `optimize-db-config`, `scale-cpu`, `scale-memory`, `compare-storage`,
-`tune-os-kernel`, `compare-postgresql-major`, and `repeatability`. Each scenario
+`tune-os-kernel`, `compare-postgresql-major`, `repeatability`, and
+[`compare-deployments`](src/pg_perf_bench/join_tasks/compare-deployments/README.md). Each scenario
 fixes the evidence required by its performance question and permits only its
 declared variable to differ. Definitions and README files are validated by
 `pg-perf-bench validate`. The historic
@@ -917,6 +978,18 @@ Run the non-destructive test suite:
 python -m pytest
 ```
 
+From a source checkout, build both distributions and verify that all current
+guides and their local links are present in the artifacts:
+
+```bash
+python -m build
+python tests/packaging/check_docs.py dist/*.whl dist/*.tar.gz
+```
+
+The release workflow runs this check before publishing. Documentation is copied
+from its canonical source files during the build; only relative links are adjusted
+to the installed layout.
+
 Integration tests are excluded by default. The supported end-to-end smoke test
 uses an explicitly provisioned disposable `pg_stand` environment:
 
@@ -938,13 +1011,20 @@ python -m pytest -m integration tests/integration/test_replication_report.py
 The common-loader suite uses disposable PostgreSQL 10/18 containers and also checks
 two synchronous physical replicas with a logical WAL consumer. Recovery tests cover
 SQL endpoint changes, restricted-role rejection before reset with a pending fsync
-journal, and replica disconnection/reconnection, including a changed IP address:
+journal, and replica disconnection/reconnection, including a changed IP address.
+Managed schema tests run all three profiles on PostgreSQL 10/18 with a restricted
+role, no access to postgres, repeated schema resets and unchanged permanent settings.
+Pool tests additionally require `docker pull ghcr.io/yandex/odyssey:1.5.0`; they exercise
+session settings and lock cleanup without DISCARD ALL, rejection of incompatible
+pools before reset, and repeated CLI runs through a compatible pool:
 
 ```bash
 PG_PERF_BENCH_INIT_INTEGRATION=1 \
   python -m pytest -q -m integration \
     tests/integration/test_initialization.py \
-    tests/integration/test_initialization_recovery.py
+    tests/integration/test_initialization_recovery.py \
+    tests/integration/test_managed_schema.py \
+    tests/integration/test_odyssey.py
 ```
 
 For a repeatable speed measurement of approximately 1 GiB per profile, run the

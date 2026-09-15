@@ -17,6 +17,7 @@ Available scenarios:
 - `compare-storage`: compare storage devices or storage layouts.
 - `tune-os-kernel`: measure an OS/kernel tuning change on identical hardware.
 - `compare-postgresql-major`: quantify a PostgreSQL major-version change.
+- `compare-deployments`: compare managed and self-managed PostgreSQL with a fixed workload.
 - `repeatability`: detect benchmark noise and regressions between identical reruns.
 
 The join stops on the first controlled-dimension mismatch. Do not remove a comparison

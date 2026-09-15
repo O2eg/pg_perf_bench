@@ -18,6 +18,7 @@ from pg_perf_bench.errors import CollectionError
 from pg_perf_bench.log import display_user_configuration
 from pg_perf_bench.report.commands import fill_info_report
 from pg_perf_bench.report.processing import get_report_structure
+from pg_perf_bench.session_settings import close_diagnostic_connection
 
 
 class InfoCollector:
@@ -164,7 +165,7 @@ class InfoCollector:
                 )
 
                 if db_conn is not None:
-                    await db_conn.close()
+                    await close_diagnostic_connection(db_conn)
                     db_conn = None
                     logger.info('Database connection closed.')
 
@@ -186,4 +187,4 @@ class InfoCollector:
             raise
         finally:
             if 'db_conn' in locals() and db_conn is not None:
-                await db_conn.close()
+                await close_diagnostic_connection(db_conn)

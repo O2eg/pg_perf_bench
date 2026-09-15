@@ -193,8 +193,9 @@ def test_restricted_role_blocks_reset_until_fsync_recovery(tmp_path, init_mode):
         asyncio.run(scenario())
 
 
+@pytest.mark.parametrize('reset_mode', ['database', 'schema'])
 @pytest.mark.parametrize('reconnect', ['none', 'same_address', 'new_address'])
-def test_replica_seen_before_reset_blocks_workload_until_replay(tmp_path, reconnect):
+def test_replica_seen_before_reset_blocks_workload_until_replay(tmp_path, reconnect, reset_mode):
     with postgres(18) as (primary, conf):
         client = docker.from_env()
         standby = None
@@ -272,14 +273,48 @@ def test_replica_seen_before_reset_blocks_workload_until_replay(tmp_path, reconn
                     'command_timeout': 20 if reconnect != 'none' else 5,
                     'system_metrics_duration': 0.1,
                     'allow_database_reset': True,
+                    'reset_mode': reset_mode,
+                    'init_synchronous_commit': 'off',
                 }
+                run_conf = conf
+                run_type = ConnectionType.DOCKER
+                run_transport = transport
+                if reset_mode == 'schema':
+                    from tests.integration.test_managed_schema import restrict_server
+
+                    run_conf = await restrict_server(conf)
+                    run_type = ConnectionType.MANAGED
+                    run_transport = None
+                    workload.update(init_fsync='keep', managed=True)
+                    with (
+                        patch.object(
+                            BenchmarkRunner, 'reset_db_environment', AsyncMock()
+                        ) as reset_mock,
+                        pytest.raises(
+                            ConfigurationError, match='visibility of pg_stat_replication'
+                        ),
+                    ):
+                        try:
+                            await BenchmarkRunner.run_benchmark_iterations(
+                                LOGGER, [['init', 'workload']], run_type, None, run_conf, workload
+                            )
+                        finally:
+                            reset_mock.assert_not_awaited()
+                    db = await asyncpg.connect(**conf)
+                    try:
+                        await db.execute('GRANT pg_monitor TO bench_owner')
+                        await db.execute(
+                            'ALTER DATABASE benchdb SET synchronous_commit=remote_apply'
+                        )
+                    finally:
+                        await db.close()
                 barrier_started = asyncio.Event()
                 barrier_result = {}
                 reset = BenchmarkRunner.reset_db_environment
                 wait = InitializationSettings.wait_for_replicas
 
-                async def reset_and_disconnect(*args):
-                    await reset(*args)
+                async def reset_and_disconnect(*args, **kwargs):
+                    await reset(*args, **kwargs)
                     await asyncio.to_thread(standby.stop, timeout=10)
 
                 async def wait_at_barrier(settings):
@@ -307,7 +342,11 @@ def test_replica_seen_before_reset_blocks_workload_until_replay(tmp_path, reconn
                     return await run_command_result(*args, **kwargs)
 
                 query = tmp_path / 'workload.sql'
-                query.write_text('SELECT 1;\n')
+                query.write_text(
+                    "SELECT 1 / (current_setting('synchronous_commit') = 'remote_apply')::int;\n"
+                    if reset_mode == 'schema'
+                    else 'SELECT 1;\n'
+                )
                 command = shlex.join(
                     [
                         '/usr/lib/postgresql/18/bin/pgbench',
@@ -341,9 +380,9 @@ def test_replica_seen_before_reset_blocks_workload_until_replay(tmp_path, reconn
                             BenchmarkRunner.run_benchmark_iterations(
                                 LOGGER,
                                 [['init', command]],
-                                ConnectionType.DOCKER,
-                                transport,
-                                conf,
+                                run_type,
+                                run_transport,
+                                run_conf,
                                 workload,
                             )
                         )
