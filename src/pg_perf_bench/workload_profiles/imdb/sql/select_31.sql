@@ -1,8 +1,8 @@
 set search_path = 'imdb';
 
 BEGIN;
-SELECT MIN(mi.info) AS movie_budget,
-       MIN(mi_idx.info) AS movie_votes,
+SELECT MIN(mi.info) AS movie_genre,
+       MIN(mi_idx.info::numeric) AS movie_votes,
        MIN(n.name) AS writer,
        MIN(t.title) AS violent_liongate_movie
 FROM cast_info AS ci,
@@ -58,8 +58,8 @@ WHERE ci.note IN ('(writer)',
 COMMIT;
 
 BEGIN;
-SELECT MIN(mi.info) AS movie_budget,
-       MIN(mi_idx.info) AS movie_votes,
+SELECT MIN(mi.info) AS movie_genre,
+       MIN(mi_idx.info::numeric) AS movie_votes,
        MIN(n.name) AS writer,
        MIN(t.title) AS violent_liongate_movie
 FROM cast_info AS ci,
@@ -120,8 +120,8 @@ WHERE ci.note IN ('(writer)',
 COMMIT;
 
 BEGIN;
-SELECT MIN(mi.info) AS movie_budget,
-       MIN(mi_idx.info) AS movie_votes,
+SELECT MIN(mi.info) AS movie_genre,
+       MIN(mi_idx.info::numeric) AS movie_votes,
        MIN(n.name) AS writer,
        MIN(t.title) AS violent_liongate_movie
 FROM cast_info AS ci,

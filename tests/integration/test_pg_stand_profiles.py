@@ -41,7 +41,7 @@ def test_bundled_profile_runs_on_pg_stand_single_node(tmp_path, profile_id):
     pg_stand = Path(
         os.environ.get(
             'PG_STAND_BIN',
-            '/home/oleg/Desktop/dev/pg_stand/.venv/bin/pg-stand',
+            str(Path(sys.executable).with_name('pg-stand')),
         )
     )
     if not pg_stand.is_file():

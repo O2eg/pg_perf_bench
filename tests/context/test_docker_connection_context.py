@@ -17,8 +17,6 @@ class TestDockerConnectionFunctions(unittest.TestCase):
             connection_type=ConnectionType.DOCKER,
             container_name='test_container',
             pg_bin_path='/usr/lib/postgresql/18/bin',
-            remote_pg_host='192.168.1.100',
-            remote_pg_port='5432',
             pg_host='127.0.0.1',
             pg_port='5432',
             pg_user='postgres',

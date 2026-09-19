@@ -11,7 +11,7 @@ SELECT * FROM bench_bounds \gset
 \set actor_id random(1, :max_actor)
 \set staff_id random(1, :max_staff)
 \set category_id random(1, :max_category)
-\set day random(0, 200)
+\set day random(0, :data_days - 1)
 \set next_day :day + 1
 
 -- Customer rental history
@@ -25,35 +25,41 @@ ORDER BY r.rental_date DESC
 LIMIT 10;
 
 -- Customer balance as of a date
-SELECT get_customer_balance(:customer_id, TIMESTAMPTZ '2022-01-01 00:00:00+00' + make_interval(days => :day));
+SELECT get_customer_balance(:customer_id, to_timestamp(:data_start_epoch + :day * 86400));
 
 -- Film availability at a store
 SELECT film_in_stock(:film_id, :store_id);
 SELECT inventory_in_stock(:inventory_id);
 
--- Film card: category, copies, rented copies, actors
+-- Film card: independently aggregate copies and cast, avoiding a many-to-many fan-out.
 SELECT f.title, f.rental_rate, f.rating, c.name AS category,
-       count(DISTINCT i.inventory_id) AS total_copies,
-       count(DISTINCT r.inventory_id) AS rented_copies,
-       string_agg(DISTINCT a.first_name || ' ' || a.last_name, ', ') AS actors
+       stock.total_copies, stock.rented_copies, cast_list.actors
 FROM film f
 JOIN film_category fc ON fc.film_id = f.film_id
 JOIN category c ON c.category_id = fc.category_id
-LEFT JOIN inventory i ON i.film_id = f.film_id
-LEFT JOIN rental r ON r.inventory_id = i.inventory_id AND r.return_date IS NULL
-LEFT JOIN film_actor fa ON fa.film_id = f.film_id
-LEFT JOIN actor a ON a.actor_id = fa.actor_id
-WHERE f.film_id = :film_id
-GROUP BY f.film_id, f.title, f.rental_rate, f.rating, c.name;
+CROSS JOIN LATERAL (
+    SELECT count(*) AS total_copies,
+           count(*) FILTER (WHERE EXISTS (
+               SELECT 1 FROM rental r WHERE r.inventory_id = i.inventory_id
+                                        AND r.return_date IS NULL)) AS rented_copies
+    FROM inventory i WHERE i.film_id = f.film_id
+) stock
+CROSS JOIN LATERAL (
+    SELECT string_agg(a.first_name || ' ' || a.last_name, ', ' ORDER BY a.actor_id) AS actors
+    FROM film_actor fa JOIN actor a ON a.actor_id = fa.actor_id
+    WHERE fa.film_id = f.film_id
+) cast_list
+WHERE f.film_id = :film_id;
 
--- Films of a category available in a store
+-- One result per film, even when several copies are available at the store.
 SELECT f.film_id, f.title, f.rental_rate
-FROM film_category fc
-JOIN film f ON f.film_id = fc.film_id
-JOIN inventory i ON i.film_id = f.film_id AND i.store_id = :store_id
+FROM film_category fc JOIN film f ON f.film_id = fc.film_id
 WHERE fc.category_id = :category_id
-  AND NOT EXISTS (
-      SELECT 1 FROM rental r WHERE r.inventory_id = i.inventory_id AND r.return_date IS NULL
+  AND EXISTS (
+      SELECT 1 FROM inventory i
+      WHERE i.film_id = f.film_id AND i.store_id = :store_id
+        AND NOT EXISTS (SELECT 1 FROM rental r WHERE r.inventory_id = i.inventory_id
+                                                AND r.return_date IS NULL)
   )
 ORDER BY f.title
 LIMIT 10;
@@ -65,8 +71,8 @@ JOIN customer c ON c.customer_id = r.customer_id
 JOIN inventory i ON i.inventory_id = r.inventory_id
 JOIN film f ON f.film_id = i.film_id
 WHERE r.staff_id = :staff_id
-  AND r.rental_date >= TIMESTAMPTZ '2022-01-01 00:00:00+00' + make_interval(days => :day)
-  AND r.rental_date <  TIMESTAMPTZ '2022-01-01 00:00:00+00' + make_interval(days => :next_day)
+  AND r.rental_date >= to_timestamp(:data_start_epoch + :day * 86400)
+  AND r.rental_date <  to_timestamp(:data_start_epoch + :next_day * 86400)
 ORDER BY r.rental_date DESC
 LIMIT 20;
 
@@ -78,7 +84,7 @@ JOIN film f ON f.film_id = i.film_id
 WHERE r.customer_id = :customer_id
   AND r.return_date IS NULL
   AND r.rental_date + make_interval(days => f.rental_duration)
-      < TIMESTAMPTZ '2022-01-01 00:00:00+00' + make_interval(days => :day)
+      < to_timestamp(:data_start_epoch + :day * 86400)
 ORDER BY r.rental_date;
 
 -- Actor filmography

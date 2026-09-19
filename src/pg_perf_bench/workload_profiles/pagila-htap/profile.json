@@ -2,7 +2,7 @@
   "schema_version": "pg_perf_bench/workload-profile-v1",
   "id": "pagila-htap",
   "title": "Synthetic Pagila HTAP",
-  "description": "The pagila OLTP mix plus a reporting script (5 % of transactions) that aggregates whole tables while short transactions run: measures OLTP degradation under analytical load.",
+  "description": "The pagila OLTP mix plus a store dashboard with indexed period and category filters (reporting weight 5 out of 105). Measures mixed transactional and bounded analytical work.",
   "requires_write": true,
   "default_scale": 1.0,
   "files": {

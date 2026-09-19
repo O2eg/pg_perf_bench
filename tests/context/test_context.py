@@ -16,8 +16,6 @@ class TestContext(unittest.TestCase):
                 self.ssh_host = '192.168.0.10'
                 self.ssh_port = '22'
                 self.ssh_key = 'my_ssh_key'
-                self.remote_pg_host = '127.0.0.1'
-                self.remote_pg_port = '5432'
 
                 self.pg_host = 'localhost'
                 self.pg_port = '5439'
@@ -62,8 +60,6 @@ class TestContext(unittest.TestCase):
                 self.ssh_host = None
                 self.ssh_port = None
                 self.ssh_key = None
-                self.remote_pg_host = None
-                self.remote_pg_port = None
 
                 self.pg_host = 'localhost'
                 self.pg_port = '5433'
@@ -111,8 +107,6 @@ class TestContext(unittest.TestCase):
                 self.ssh_host = None
                 self.ssh_port = None
                 self.ssh_key = None
-                self.remote_pg_host = None
-                self.remote_pg_port = None
 
                 self.pg_host = 'localhost'
                 self.pg_port = '5434'
@@ -152,8 +146,6 @@ class TestContext(unittest.TestCase):
                 self.ssh_host = '192.168.0.10'
                 self.ssh_port = '22'
                 self.ssh_key = 'some_key'
-                self.remote_pg_host = '127.0.0.1'
-                self.remote_pg_port = '5432'
 
                 self.pg_host = 'localhost'
                 self.pg_port = None  # Missing parameter
@@ -196,8 +188,6 @@ class TestCollectInfoContext(unittest.TestCase):
                 self.ssh_host = '10.0.0.10'
                 self.ssh_port = '22'
                 self.ssh_key = '/path/to/key'
-                self.remote_pg_host = '127.0.0.1'
-                self.remote_pg_port = '5432'
 
                 self.pg_host = 'localhost'
                 self.pg_port = '5439'
@@ -216,7 +206,8 @@ class TestCollectInfoContext(unittest.TestCase):
         args = Args()
         ci_context = CollectInfoContext(args, self.logger)
         self.assertIn('conn_conf', ci_context.structured_params)
-        self.assertIn('tunnel_params', ci_context.structured_params['conn_conf'])
+        self.assertNotIn('tunnel_params', ci_context.structured_params['conn_conf'])
+        self.assertEqual(ci_context.structured_params['db_conf']['db_conn_params']['port'], '5439')
         self.assertIn('report_name', ci_context.structured_params['report_conf'])
 
     def test_collect_info_missing_param(self):
@@ -228,8 +219,6 @@ class TestCollectInfoContext(unittest.TestCase):
                 self.ssh_host = None
                 self.ssh_port = None
                 self.ssh_key = None
-                self.remote_pg_host = None
-                self.remote_pg_port = None
 
                 self.pg_host = None
                 self.pg_port = None

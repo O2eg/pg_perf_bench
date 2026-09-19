@@ -187,8 +187,6 @@ class HostConfig:
     ssh_agent: bool = False
     ssh_known_hosts: Path | None = None
     ssh_insecure_no_host_key_check: bool = False
-    remote_pg_host: str | None = None
-    remote_pg_port: int | None = None
 
     def connection_kwargs(
         self,
@@ -231,13 +229,6 @@ class HostConfig:
             'env': env,
             'command_timeout': self.command_timeout,
         }
-        if database is not None and self.remote_pg_host and self.remote_pg_port:
-            result['tunnel_params'] = {
-                'local_host': database.host,
-                'local_port': database.port,
-                'remote_host': self.remote_pg_host,
-                'remote_port': self.remote_pg_port,
-            }
         return result
 
 
@@ -317,8 +308,19 @@ class RuntimeConfig:
     raw_args: dict[str, Any]
 
 
+def reject_database_tunnel(values: dict[str, Any]) -> None:
+    if any(values.get(name) is not None for name in ('remote_pg_host', 'remote_pg_port')):
+        raise ConfigurationError(
+            'SSH database port forwarding has been removed: --remote-pg-host and '
+            '--remote-pg-port are no longer supported. Set --host and --port to a '
+            'PostgreSQL or pooler endpoint reachable directly from the load generator; '
+            'SSH is used only for host operations and OS metrics.'
+        )
+
+
 def build_runtime_config(args: Any) -> RuntimeConfig:
     values = vars(args).copy()
+    reject_database_tunnel(values)
     report_name = _report_name(values.get('report_name'))
     try:
         mode = WorkMode(values.get('mode') or values.get('command'))
@@ -403,14 +405,8 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
             Path(values['ssh_known_hosts']).expanduser() if values.get('ssh_known_hosts') else None
         ),
         ssh_insecure_no_host_key_check=bool(values.get('ssh_insecure_no_host_key_check')),
-        remote_pg_host=values.get('remote_pg_host'),
-        remote_pg_port=(
-            _positive_int(values['remote_pg_port'], '--remote-pg-port')
-            if values.get('remote_pg_port') is not None
-            else None
-        ),
     )
-    _validate_host(host, needs_database=needs_database)
+    _validate_host(host)
 
     workload: WorkloadConfig | None = None
     if mode == WorkMode.BENCHMARK:
@@ -587,7 +583,7 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
     )
 
 
-def _validate_host(host: HostConfig, *, needs_database: bool) -> None:
+def _validate_host(host: HostConfig) -> None:
     if host.connection_type == ConnectionType.DOCKER:
         _required(host.container_name, '--container-name')
         return
@@ -609,6 +605,3 @@ def _validate_host(host: HostConfig, *, needs_database: bool) -> None:
                 'provide --ssh-known-hosts or explicitly use '
                 '--ssh-insecure-no-host-key-check'
             )
-    if needs_database:
-        _required(host.remote_pg_host, '--remote-pg-host')
-        _required(host.remote_pg_port, '--remote-pg-port')

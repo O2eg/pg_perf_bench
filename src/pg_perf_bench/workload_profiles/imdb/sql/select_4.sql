@@ -1,7 +1,7 @@
 set search_path = 'imdb';
 
 BEGIN;
-SELECT MIN(mi_idx.info) AS rating,
+SELECT MIN(mi_idx.info::numeric) AS rating,
        MIN(t.title) AS movie_title
 FROM info_type AS it,
      keyword AS k,
@@ -10,7 +10,7 @@ FROM info_type AS it,
      title AS t
 WHERE it.info ='rating'
   AND k.keyword LIKE '%sequel%'
-  AND mi_idx.info > '5.0'
+  AND mi_idx.info::numeric > '5.0'
   AND t.production_year > 2005
   AND t.id = mi_idx.movie_id
   AND t.id = mk.movie_id
@@ -21,7 +21,7 @@ WHERE it.info ='rating'
 COMMIT;
 
 BEGIN;
-SELECT MIN(mi_idx.info) AS rating,
+SELECT MIN(mi_idx.info::numeric) AS rating,
        MIN(t.title) AS movie_title
 FROM info_type AS it,
      keyword AS k,
@@ -30,7 +30,7 @@ FROM info_type AS it,
      title AS t
 WHERE it.info ='rating'
   AND k.keyword LIKE '%sequel%'
-  AND mi_idx.info > '9.0'
+  AND mi_idx.info::numeric > '9.0'
   AND t.production_year > 2010
   AND t.id = mi_idx.movie_id
   AND t.id = mk.movie_id
@@ -41,7 +41,7 @@ WHERE it.info ='rating'
 COMMIT;
 
 BEGIN;
-SELECT MIN(mi_idx.info) AS rating,
+SELECT MIN(mi_idx.info::numeric) AS rating,
        MIN(t.title) AS movie_title
 FROM info_type AS it,
      keyword AS k,
@@ -50,7 +50,7 @@ FROM info_type AS it,
      title AS t
 WHERE it.info ='rating'
   AND k.keyword LIKE '%sequel%'
-  AND mi_idx.info > '2.0'
+  AND mi_idx.info::numeric > '2.0'
   AND t.production_year > 1990
   AND t.id = mi_idx.movie_id
   AND t.id = mk.movie_id

@@ -258,5 +258,89 @@
   {
     "name": "payment_p2022_07_pkey",
     "sql": "CREATE UNIQUE INDEX payment_p2022_07_pkey ON pagila.payment_p2022_07 (payment_date, payment_id)"
+  },
+  {
+    "name": "rental_customer_date_idx",
+    "sql": "CREATE INDEX rental_customer_date_idx ON pagila.rental (customer_id, rental_date DESC);"
+  },
+  {
+    "name": "rental_staff_date_idx",
+    "sql": "CREATE INDEX rental_staff_date_idx ON pagila.rental (staff_id, rental_date, inventory_id);"
+  },
+  {
+    "name": "rental_open_inventory_idx",
+    "sql": "CREATE UNIQUE INDEX rental_open_inventory_idx ON pagila.rental (inventory_id) WHERE return_date IS NULL;"
+  },
+  {
+    "name": "rental_open_customer_idx",
+    "sql": "CREATE INDEX rental_open_customer_idx ON pagila.rental (customer_id, rental_date) WHERE return_date IS NULL;"
+  },
+  {
+    "name": "inventory_film_store_idx",
+    "sql": "CREATE INDEX inventory_film_store_idx ON pagila.inventory (film_id, store_id, inventory_id);"
+  },
+  {
+    "name": "staff_store_idx",
+    "sql": "CREATE INDEX staff_store_idx ON pagila.staff (store_id, staff_id);"
+  },
+  {
+    "name": "film_category_category_film_idx",
+    "sql": "CREATE INDEX film_category_category_film_idx ON pagila.film_category (category_id, film_id);"
+  },
+  {
+    "name": "payment_p2022_01_staff_date_idx",
+    "sql": "CREATE INDEX payment_p2022_01_staff_date_idx ON pagila.payment_p2022_01 (staff_id, payment_date, rental_id);"
+  },
+  {
+    "name": "payment_p2022_01_customer_date_idx",
+    "sql": "CREATE INDEX payment_p2022_01_customer_date_idx ON pagila.payment_p2022_01 (customer_id, payment_date DESC, payment_id DESC);"
+  },
+  {
+    "name": "payment_p2022_02_staff_date_idx",
+    "sql": "CREATE INDEX payment_p2022_02_staff_date_idx ON pagila.payment_p2022_02 (staff_id, payment_date, rental_id);"
+  },
+  {
+    "name": "payment_p2022_02_customer_date_idx",
+    "sql": "CREATE INDEX payment_p2022_02_customer_date_idx ON pagila.payment_p2022_02 (customer_id, payment_date DESC, payment_id DESC);"
+  },
+  {
+    "name": "payment_p2022_03_staff_date_idx",
+    "sql": "CREATE INDEX payment_p2022_03_staff_date_idx ON pagila.payment_p2022_03 (staff_id, payment_date, rental_id);"
+  },
+  {
+    "name": "payment_p2022_03_customer_date_idx",
+    "sql": "CREATE INDEX payment_p2022_03_customer_date_idx ON pagila.payment_p2022_03 (customer_id, payment_date DESC, payment_id DESC);"
+  },
+  {
+    "name": "payment_p2022_04_staff_date_idx",
+    "sql": "CREATE INDEX payment_p2022_04_staff_date_idx ON pagila.payment_p2022_04 (staff_id, payment_date, rental_id);"
+  },
+  {
+    "name": "payment_p2022_04_customer_date_idx",
+    "sql": "CREATE INDEX payment_p2022_04_customer_date_idx ON pagila.payment_p2022_04 (customer_id, payment_date DESC, payment_id DESC);"
+  },
+  {
+    "name": "payment_p2022_05_staff_date_idx",
+    "sql": "CREATE INDEX payment_p2022_05_staff_date_idx ON pagila.payment_p2022_05 (staff_id, payment_date, rental_id);"
+  },
+  {
+    "name": "payment_p2022_05_customer_date_idx",
+    "sql": "CREATE INDEX payment_p2022_05_customer_date_idx ON pagila.payment_p2022_05 (customer_id, payment_date DESC, payment_id DESC);"
+  },
+  {
+    "name": "payment_p2022_06_staff_date_idx",
+    "sql": "CREATE INDEX payment_p2022_06_staff_date_idx ON pagila.payment_p2022_06 (staff_id, payment_date, rental_id);"
+  },
+  {
+    "name": "payment_p2022_06_customer_date_idx",
+    "sql": "CREATE INDEX payment_p2022_06_customer_date_idx ON pagila.payment_p2022_06 (customer_id, payment_date DESC, payment_id DESC);"
+  },
+  {
+    "name": "payment_p2022_07_staff_date_idx",
+    "sql": "CREATE INDEX payment_p2022_07_staff_date_idx ON pagila.payment_p2022_07 (staff_id, payment_date, rental_id);"
+  },
+  {
+    "name": "payment_p2022_07_customer_date_idx",
+    "sql": "CREATE INDEX payment_p2022_07_customer_date_idx ON pagila.payment_p2022_07 (customer_id, payment_date DESC, payment_id DESC);"
   }
 ]

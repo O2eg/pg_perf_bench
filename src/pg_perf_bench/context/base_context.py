@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pg_perf_bench.config import resolve_ssh_agent_socket
+from pg_perf_bench.config import reject_database_tunnel, resolve_ssh_agent_socket
 from pg_perf_bench.const import ConnectionType
 
 
@@ -19,6 +19,7 @@ class BaseContext:
     """Base class for all context classes with common functionality"""
 
     def __init__(self, args, logger):
+        reject_database_tunnel(vars(args))
         self.structured_params = {'args': vars(args), 'logger': logger}
 
     def filter_none(self, d: dict) -> dict:

@@ -1,4 +1,4 @@
-"""AsyncSSH host transport with native local forwarding."""
+"""AsyncSSH transport for remote host operations; SQL uses direct connections."""
 
 from __future__ import annotations
 
@@ -15,16 +15,14 @@ class SSHConnection:
     def __init__(
         self,
         conn_params: dict[str, Any],
-        tunnel_params: dict[str, Any] | None = None,
+        *,
         env: dict[str, str] | None = None,
         command_timeout: float = 300.0,
     ) -> None:
         self.conn_params = {key: value for key, value in conn_params.items() if value is not None}
-        self.tunnel_params = tunnel_params
         self.env = {str(key): str(value) for key, value in (env or {}).items()}
         self.command_timeout = float(command_timeout)
         self.client: asyncssh.SSHClientConnection | None = None
-        self.tunnel: Any = None
         self.logger = None
 
     async def start(self) -> None:
@@ -32,13 +30,6 @@ class SSHConnection:
             return
         try:
             self.client = await asyncssh.connect(**self.conn_params)
-            if self.tunnel_params:
-                self.tunnel = await self.client.forward_local_port(
-                    self.tunnel_params['local_host'],
-                    int(self.tunnel_params['local_port']),
-                    self.tunnel_params['remote_host'],
-                    int(self.tunnel_params['remote_port']),
-                )
         except asyncssh.PermissionDenied as exc:
             await self.aclose()
             raise PermissionError(
@@ -52,10 +43,6 @@ class SSHConnection:
             raise
 
     async def aclose(self) -> None:
-        if self.tunnel is not None:
-            self.tunnel.close()
-            await self.tunnel.wait_closed()
-            self.tunnel = None
         if self.client is not None:
             self.client.close()
             await self.client.wait_closed()
@@ -63,9 +50,6 @@ class SSHConnection:
 
     def close(self) -> None:
         """Start non-blocking close for compatibility with older callers."""
-        if self.tunnel is not None:
-            self.tunnel.close()
-            self.tunnel = None
         if self.client is not None:
             self.client.close()
 

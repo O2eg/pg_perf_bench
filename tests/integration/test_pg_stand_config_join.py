@@ -85,7 +85,7 @@ def test_config_change_then_join_stacks_tps_and_cpu_charts(tmp_path):
     pg_stand = Path(
         os.environ.get(
             'PG_STAND_BIN',
-            '/home/oleg/Desktop/dev/pg_stand/.venv/bin/pg-stand',
+            str(Path(sys.executable).with_name('pg-stand')),
         )
     )
     if not pg_stand.is_file():

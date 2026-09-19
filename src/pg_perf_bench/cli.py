@@ -110,7 +110,7 @@ def _add_host_args(parser: argparse.ArgumentParser, *, required: bool = True) ->
     parser.add_argument('--pg-data-path')
     parser.add_argument('--pg-bin-path')
     parser.add_argument('--container-name')
-    parser.add_argument('--ssh-host')
+    parser.add_argument('--ssh-host', help='remote host for OS metrics and host operations')
     parser.add_argument('--ssh-port', type=positive_int, default=22)
     parser.add_argument('--ssh-user', default='postgres')
     ssh_auth = parser.add_mutually_exclusive_group()
@@ -122,8 +122,8 @@ def _add_host_args(parser: argparse.ArgumentParser, *, required: bool = True) ->
     )
     parser.add_argument('--ssh-known-hosts')
     parser.add_argument('--ssh-insecure-no-host-key-check', action='store_true')
-    parser.add_argument('--remote-pg-host')
-    parser.add_argument('--remote-pg-port', type=positive_int)
+    parser.add_argument('--remote-pg-host', help=argparse.SUPPRESS)
+    parser.add_argument('--remote-pg-port', type=positive_int, help=argparse.SUPPRESS)
 
 
 def _add_database_args(
@@ -131,8 +131,19 @@ def _add_database_args(
     *,
     include_custom_config: bool = False,
 ) -> None:
-    parser.add_argument('--host', '--pg-host', dest='pg_host')
-    parser.add_argument('--port', '--pg-port', dest='pg_port', type=positive_int)
+    parser.add_argument(
+        '--host',
+        '--pg-host',
+        dest='pg_host',
+        help='PostgreSQL or pooler host reachable directly from the load generator',
+    )
+    parser.add_argument(
+        '--port',
+        '--pg-port',
+        dest='pg_port',
+        type=positive_int,
+        help='direct PostgreSQL or pooler TCP port',
+    )
     parser.add_argument('--user', '--pg-user', dest='pg_user', default='postgres')
     parser.add_argument(
         '--password',

@@ -62,7 +62,8 @@ identifier works through Odyssey even when `smart_search_path_enquoting` is
 unavailable. PostgreSQL still resolves built-in objects through `pg_catalog`.
 The bundled workloads do not need `public` in this path. Database and role defaults
 are not changed. `ALTER DATABASE/ROLE ... SET search_path` is not a fallback:
-on the tested MDB endpoint these commands succeeded but did not affect new sessions.
+the utility requires the effective startup path to match the profile, including
+through a pooler, rather than relying on persistent defaults.
 
 A custom profile with several schemas or names requiring quotes still needs an
 endpoint that preserves that list. With configurable Odyssey, enable
@@ -91,35 +92,35 @@ mode and timeouts before returning to the pool. Managed service/loader connectio
 disable asyncpg's named statement cache to avoid collisions between repeated CLI
 processes when pool cleanup is unavailable. This does not set pgbench's protocol.
 
-### MDB connection limits and a validation run
+### MDB connection limits
 
 Allow enough server connections for the controller and preparation connection plus
 all loader workers, and later for the controller plus all pgbench clients. A pool
 smaller than the selected concurrency can serialize clients, time out or reject
 connections. The utility does not change provider connection limits.
 
-On the tested MDB cluster, a per-user limit of 50 allowed 16 clients but rejected
-the 64-client point with `too many active clients` / `pool_size ... reached 50`.
-Increase the user's **Conn limit** through the provider console/API; SQL
-`ALTER ROLE ... CONNECTION LIMIT` may be unavailable. The supplied MDB validation
-used a limit of **500** and completed the 16/64/128-client sweep with zero failed
-transactions. This is evidence for that cluster, not a universal required limit.
+Errors such as `too many active clients` or `pool_size ... reached` indicate that
+the selected concurrency exceeds a connection or pool limit. Check both limits
+and leave capacity for the controller, diagnostics and other required sessions.
+Configure the user's **Conn limit** through the provider console/API when SQL
+`ALTER ROLE ... CONNECTION LIMIT` is unavailable. Choose the limit for the intended
+client sweep and server capacity; there is no universal required value.
 
-The same validation case, with endpoint and certificate placeholders:
+Example client sweep after configuring connection limits:
 
 ```bash
 PGPASSFILE=/secure/benchmark.pgpass \
 PGSSLMODE=verify-full PGSSLROOTCERT=/secure/managed-ca.pem \
 pg-perf-bench benchmark \
   --managed --host managed-primary.example --port 6432 --user user1 \
-  --database db1 --allow-database-reset --reset-mode schema \
+  --database pg_perf_bench_test --allow-database-reset --reset-mode schema \
   --init-fsync keep --workload-profile pagila --workload-scale 30 \
   --workload-duration-seconds 60 --pgbench-clients 16,64,128 \
-  --command-timeout 3600 --report-name mdb-pagila-s30-c16c64c128
+  --command-timeout 3600 --report-name managed-pagila
 ```
 
-Use a dedicated, pre-created `db1` with the permissions described above. Omit
-`--pgbench-prepared` for the tested simple-protocol path. Start with scale `1.15`,
+Use a dedicated, pre-created `pg_perf_bench_test` with the permissions described above.
+Omit `--pgbench-prepared` to use the default simple protocol. Start with scale `1.15`,
 5 seconds and clients `1,2` when checking a new endpoint before the larger sweep.
 
 ## Reports and retries

@@ -188,6 +188,15 @@ def test_pagila_profiles_share_sources_and_declare_the_oltp_mix():
         assert (root / 'pagila' / relative).read_bytes() == (
             root / 'pagila-htap' / relative
         ).read_bytes(), relative
+    for relative in (
+        'initialization-indexes.json',
+        'initialization-constraints.json',
+        'sql/initialization-schema.sql',
+        'sql/initialization-finalize.sql',
+    ):
+        assert (root / 'pagila' / relative).read_bytes() == (
+            root / 'pagila-htap' / relative
+        ).read_bytes(), relative
     oltp = json.loads((root / 'pagila/profile.json').read_text(encoding='utf-8'))
     htap = json.loads((root / 'pagila-htap/profile.json').read_text(encoding='utf-8'))
     for profile in (oltp, htap):

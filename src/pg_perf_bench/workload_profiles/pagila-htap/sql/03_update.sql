@@ -2,22 +2,22 @@
 -- Table bounds come from pagila.bench_bounds, a one-row table filled by the setup script,
 -- so identifier selection costs one single-row read instead of a scan per table.
 SELECT * FROM bench_bounds \gset
-\set rental_id random(1, :max_rental)
 \set customer_id random(1, :max_customer)
 \set film_id random(1, :max_film)
 \set staff_id random(1, :max_staff)
 \set inventory_id random(1, :max_inventory)
 \set store_id random(1, :max_store)
-\set day random(0, 200)
+\set day random(0, :data_days - 1)
 \set ret_days random(1, 8)
 \set suffix random(1, 1000000)
 \set rating_roll random(0, 19)
 \set duration_roll random(0, 9)
 
--- Process a return
+-- Return the selected copy, including rentals created after initialization.
+-- The partial unique inventory index locates at most one open rental.
 UPDATE rental
 SET return_date = rental_date + make_interval(days => :ret_days)
-WHERE rental_id = :rental_id AND return_date IS NULL;
+WHERE inventory_id = :inventory_id AND return_date IS NULL;
 
 -- Customer contact update
 UPDATE customer
@@ -48,13 +48,13 @@ SET email = 'staff' || :suffix || '@example.test',
     password = 'pass' || :suffix
 WHERE staff_id = :staff_id;
 
--- Late fee on the customer's latest payment
-UPDATE payment
-SET amount = amount + 1.00
-WHERE customer_id = :customer_id
-  AND payment_date = (
-      SELECT max(p.payment_date) FROM payment p WHERE p.customer_id = :customer_id
-  );
+-- Late fee on exactly one latest payment; partition-local customer/date indexes.
+WITH latest AS (
+    SELECT payment_date, payment_id FROM payment WHERE customer_id = :customer_id
+    ORDER BY payment_date DESC, payment_id DESC LIMIT 1
+)
+UPDATE payment p SET amount = p.amount + 1.00
+FROM latest WHERE p.payment_date = latest.payment_date AND p.payment_id = latest.payment_id;
 
 -- Film metadata drift (a CASE test parameter must be cast: prepared mode would type it text)
 UPDATE film
@@ -80,9 +80,14 @@ WHERE i.inventory_id = r.inventory_id
   AND r.customer_id = :customer_id
   AND r.return_date IS NULL
   AND r.rental_date + make_interval(days => f.rental_duration)
-      < TIMESTAMPTZ '2022-01-01 00:00:00+00' + make_interval(days => :day);
+      < to_timestamp(:data_start_epoch + :day * 86400);
 
--- Move an unrented copy to another store
+-- Lock first, then check availability in a fresh READ COMMITTED snapshot.
+-- A rental committed while this lock was pending must prevent the move.
+BEGIN ISOLATION LEVEL READ COMMITTED;
+SELECT inventory_id FROM inventory
+WHERE inventory_id = :inventory_id
+FOR UPDATE;
 UPDATE inventory
 SET store_id = :store_id
 WHERE inventory_id = :inventory_id
@@ -90,3 +95,4 @@ WHERE inventory_id = :inventory_id
   AND NOT EXISTS (
       SELECT 1 FROM rental r WHERE r.inventory_id = :inventory_id AND r.return_date IS NULL
   );
+COMMIT;

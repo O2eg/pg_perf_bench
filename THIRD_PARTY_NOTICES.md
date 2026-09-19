@@ -29,8 +29,7 @@ SOFTWARE.
 
 ## Join Order Benchmark and source IMDB data
 
-The original development workspace may contain local Join Order Benchmark SQL
-and source IMDB data. They are deliberately excluded from the source
+External Join Order Benchmark SQL and source IMDB data are excluded from the source
 distribution and wheel because the upstream repository does not publish an
 explicit license. The bundled profile named `imdb` is an independent synthetic
 movie-domain schema, generator, and workload; it does not contain or derive from

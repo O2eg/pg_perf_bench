@@ -44,6 +44,16 @@ create index movie_complete_cast on complete_cast(movie_id, subject_id, status_i
 create index movie_link_pair on movie_link(movie_id, linked_movie_id, link_type_id);
 create index person_info_pair on person_info(person_id, info_type_id);
 
+-- Semantic keys and selective analytical lookups.
+CREATE UNIQUE INDEX movie_info_idx_one_value ON movie_info_idx(movie_id, info_type_id);
+CREATE INDEX movie_info_idx_numeric ON movie_info_idx(info_type_id, (info::numeric), movie_id);
+CREATE UNIQUE INDEX movie_keyword_lookup ON movie_keyword(keyword_id, movie_id);
+CREATE UNIQUE INDEX movie_info_value_lookup ON movie_info(info_type_id, info text_pattern_ops, movie_id);
+CREATE INDEX company_movie_lookup ON movie_companies(company_id, movie_id, company_type_id);
+CREATE INDEX person_movie_lookup ON cast_info(person_id, movie_id, role_id);
+CREATE UNIQUE INDEX complete_cast_one_status ON complete_cast(movie_id, subject_id);
+CREATE UNIQUE INDEX movie_link_unique ON movie_link(movie_id, linked_movie_id, link_type_id);
+
 analyze aka_name;
 analyze aka_title;
 analyze cast_info;

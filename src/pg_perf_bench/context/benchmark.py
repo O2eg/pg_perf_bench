@@ -18,15 +18,6 @@ class Context(BaseContext):
         # Add connection configuration
         self._add_connection_config(args)
 
-        # Add SSH tunnel params if needed
-        if args.connection_type == ConnectionType.SSH:
-            self.structured_params['conn_conf']['tunnel_params'] = {
-                'remote_host': args.remote_pg_host,
-                'remote_port': int(args.remote_pg_port),
-                'local_host': args.pg_host,
-                'local_port': int(args.pg_port),
-            }
-
         # Add database configuration
         self.structured_params['db_conf'] = {
             'host': args.pg_host,
@@ -94,8 +85,6 @@ class Context(BaseContext):
         SSHConnectionArgs = [
             'ssh_host',
             'ssh_port',
-            'remote_pg_host',
-            'remote_pg_port',
         ]
         DockerConnectionArgs = [
             'container_name',

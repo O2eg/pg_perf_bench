@@ -2,7 +2,7 @@ set search_path = 'imdb';
 
 BEGIN;
 SELECT MIN(cn.name) AS movie_company,
-       MIN(mi_idx.info) AS rating,
+       MIN(mi_idx.info::numeric) AS rating,
        MIN(t.title) AS complete_euro_dark_movie
 FROM complete_cast AS cc,
      comp_cast_type AS cct1,
@@ -41,7 +41,7 @@ WHERE cct1.kind = 'crew'
                   'German',
                   'USA',
                   'American')
-  AND mi_idx.info < '8.5'
+  AND mi_idx.info::numeric < '8.5'
   AND t.production_year > 2000
   AND kt.id = t.kind_id
   AND t.id = mi.movie_id
@@ -71,7 +71,7 @@ COMMIT;
 
 BEGIN;
 SELECT MIN(cn.name) AS movie_company,
-       MIN(mi_idx.info) AS rating,
+       MIN(mi_idx.info::numeric) AS rating,
        MIN(t.title) AS complete_euro_dark_movie
 FROM complete_cast AS cc,
      comp_cast_type AS cct1,
@@ -104,7 +104,7 @@ WHERE cct1.kind = 'crew'
                   'Germany',
                   'Swedish',
                   'German')
-  AND mi_idx.info > '6.5'
+  AND mi_idx.info::numeric > '6.5'
   AND t.production_year > 2005
   AND kt.id = t.kind_id
   AND t.id = mi.movie_id
@@ -134,7 +134,7 @@ COMMIT;
 
 BEGIN;
 SELECT MIN(cn.name) AS movie_company,
-       MIN(mi_idx.info) AS rating,
+       MIN(mi_idx.info::numeric) AS rating,
        MIN(t.title) AS complete_euro_dark_movie
 FROM complete_cast AS cc,
      comp_cast_type AS cct1,
@@ -173,7 +173,7 @@ WHERE cct1.kind = 'cast'
                   'German',
                   'USA',
                   'American')
-  AND mi_idx.info < '8.5'
+  AND mi_idx.info::numeric < '8.5'
   AND t.production_year > 2005
   AND kt.id = t.kind_id
   AND t.id = mi.movie_id

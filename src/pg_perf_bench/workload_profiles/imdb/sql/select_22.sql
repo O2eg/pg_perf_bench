@@ -2,7 +2,7 @@ set search_path = 'imdb';
 
 BEGIN;
 SELECT MIN(cn.name) AS movie_company,
-       MIN(mi_idx.info) AS rating,
+       MIN(mi_idx.info::numeric) AS rating,
        MIN(t.title) AS western_violent_movie
 FROM company_name AS cn,
      company_type AS ct,
@@ -30,7 +30,7 @@ WHERE cn.country_code != '[us]'
                   'German',
                   'USA',
                   'American')
-  AND mi_idx.info < '7.0'
+  AND mi_idx.info::numeric < '7.0'
   AND t.production_year > 2008
   AND kt.id = t.kind_id
   AND t.id = mi.movie_id
@@ -53,7 +53,7 @@ COMMIT;
 
 BEGIN;
 SELECT MIN(cn.name) AS movie_company,
-       MIN(mi_idx.info) AS rating,
+       MIN(mi_idx.info::numeric) AS rating,
        MIN(t.title) AS western_violent_movie
 FROM company_name AS cn,
      company_type AS ct,
@@ -81,8 +81,8 @@ WHERE cn.country_code != '[us]'
                   'German',
                   'USA',
                   'American')
-  AND mi_idx.info < '7.0'
-  AND t.production_year > 2009
+  AND mi_idx.info::numeric < '7.0'
+  AND t.production_year BETWEEN 2006 AND 2009
   AND kt.id = t.kind_id
   AND t.id = mi.movie_id
   AND t.id = mk.movie_id
@@ -104,7 +104,7 @@ COMMIT;
 
 BEGIN;
 SELECT MIN(cn.name) AS movie_company,
-       MIN(mi_idx.info) AS rating,
+       MIN(mi_idx.info::numeric) AS rating,
        MIN(t.title) AS western_violent_movie
 FROM company_name AS cn,
      company_type AS ct,
@@ -138,7 +138,7 @@ WHERE cn.country_code != '[us]'
                   'German',
                   'USA',
                   'American')
-  AND mi_idx.info < '8.5'
+  AND mi_idx.info::numeric < '8.5'
   AND t.production_year > 2005
   AND kt.id = t.kind_id
   AND t.id = mi.movie_id
@@ -161,7 +161,7 @@ COMMIT;
 
 BEGIN;
 SELECT MIN(cn.name) AS movie_company,
-       MIN(mi_idx.info) AS rating,
+       MIN(mi_idx.info::numeric) AS rating,
        MIN(t.title) AS western_violent_movie
 FROM company_name AS cn,
      company_type AS ct,
@@ -193,7 +193,7 @@ WHERE cn.country_code != '[us]'
                   'German',
                   'USA',
                   'American')
-  AND mi_idx.info < '8.5'
+  AND mi_idx.info::numeric < '8.5'
   AND t.production_year > 2005
   AND kt.id = t.kind_id
   AND t.id = mi.movie_id

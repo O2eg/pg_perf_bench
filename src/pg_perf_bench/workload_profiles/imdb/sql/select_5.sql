@@ -40,7 +40,7 @@ WHERE ct.kind = 'production companies'
   AND mc.note LIKE '%(1994)%'
   AND mi.info IN ('USA',
                   'America')
-  AND t.production_year > 2010
+  AND t.production_year BETWEEN 1990 AND 1994
   AND t.id = mi.movie_id
   AND t.id = mc.movie_id
   AND mc.movie_id = mi.movie_id

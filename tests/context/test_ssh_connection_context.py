@@ -20,10 +20,8 @@ class TestSSHConnectionFunctions(unittest.IsolatedAsyncioTestCase):
             ssh_key='/home/test/.ssh/id_rsa',
             ssh_known_hosts='/home/test/.ssh/known_hosts',
             ssh_insecure_no_host_key_check=False,
-            remote_pg_host='192.168.1.100',
-            remote_pg_port=5432,
-            pg_host='127.0.0.1',
-            pg_port=5433,
+            pg_host='192.168.1.100',
+            pg_port=5432,
             pg_user='postgres',
             pg_password='secret',
             pg_database='test_db',
@@ -46,23 +44,18 @@ class TestSSHConnectionFunctions(unittest.IsolatedAsyncioTestCase):
             command_timeout=30,
         )
         context = Context(args, MagicMock())
+        self.context = context
         self.connection = SSHConnection(**context.structured_params['conn_conf'])
 
-    async def test_context_uses_asyncssh_parameters_and_native_tunnel(self):
+    async def test_context_preserves_direct_database_endpoint_without_forwarding(self):
         self.assertEqual(self.connection.conn_params['username'], 'postgres')
         self.assertEqual(
             self.connection.conn_params['known_hosts'],
             '/home/test/.ssh/known_hosts',
         )
-        self.assertEqual(
-            self.connection.tunnel_params,
-            {
-                'remote_host': '192.168.1.100',
-                'remote_port': 5432,
-                'local_host': '127.0.0.1',
-                'local_port': 5433,
-            },
-        )
+        self.assertEqual(self.context.structured_params['db_conf']['host'], '192.168.1.100')
+        self.assertEqual(self.context.structured_params['db_conf']['port'], 5432)
+        self.assertNotIn('tunnel_params', self.context.structured_params['conn_conf'])
 
         client = MagicMock()
         client.forward_local_port = AsyncMock(return_value=MagicMock())
@@ -72,7 +65,7 @@ class TestSSHConnectionFunctions(unittest.IsolatedAsyncioTestCase):
         ):
             await self.connection.start()
 
-        client.forward_local_port.assert_awaited_once_with('127.0.0.1', 5433, '192.168.1.100', 5432)
+        client.forward_local_port.assert_not_called()
 
     async def test_connection_error_is_normalized(self):
         with patch(

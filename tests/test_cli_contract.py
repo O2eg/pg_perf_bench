@@ -326,3 +326,77 @@ def test_unsafe_report_name_fails_before_execution():
     )
     with pytest.raises(ConfigurationError, match='unsafe --report-name'):
         build_runtime_config(args)
+
+
+@pytest.mark.parametrize('mode', ['benchmark', 'collect-db-info', 'collect-all-info'])
+def test_ssh_database_modes_use_direct_endpoint(tmp_path, mode):
+    key = tmp_path / 'key'
+    key.touch()
+    known_hosts = tmp_path / 'known_hosts'
+    known_hosts.touch()
+    if mode == 'benchmark':
+        argv = _benchmark_arguments() + ['--allow-database-reset']
+        argv[argv.index('--connection-type') + 1] = 'ssh'
+    else:
+        argv = [
+            mode,
+            '--connection-type',
+            'ssh',
+            '--database',
+            'bench_db',
+            '--pg-bin-path',
+            '/usr/lib/postgresql/18/bin',
+        ]
+    argv += [
+        '--host',
+        'pooler.example',
+        '--port',
+        '6432',
+        '--ssh-host',
+        'metrics.example',
+        '--ssh-key',
+        str(key),
+        '--ssh-known-hosts',
+        str(known_hosts),
+    ]
+    config = build_runtime_config(build_parser().parse_args(argv))
+    assert config.database.host == 'pooler.example'
+    assert config.database.port == 6432
+    kwargs = config.host.connection_kwargs(config.database)
+    assert kwargs['conn_params']['host'] == 'metrics.example'
+    assert 'tunnel_params' not in kwargs
+
+
+@pytest.mark.parametrize(
+    'obsolete',
+    [
+        ['--remote-pg-host', '127.0.0.1'],
+        ['--remote-pg-port', '5432'],
+        ['--remote-pg-host', '127.0.0.1', '--remote-pg-port', '5432'],
+    ],
+)
+def test_removed_tunnel_options_fail_before_connecting(obsolete):
+    args = build_parser().parse_args(['collect-sys-info', '--connection-type', 'ssh', *obsolete])
+    with patch('pg_perf_bench.connections.ssh.asyncssh.connect') as connect:
+        with pytest.raises(ConfigurationError, match='port forwarding has been removed'):
+            build_runtime_config(args)
+        connect.assert_not_called()
+
+
+def test_removed_tunnel_options_return_machine_migration_error(capsys):
+    assert (
+        main(
+            [
+                '--machine',
+                'collect-sys-info',
+                '--connection-type',
+                'ssh',
+                '--remote-pg-port',
+                '5432',
+            ]
+        )
+        == 2
+    )
+    result = json.loads(capsys.readouterr().out)
+    assert result['error']['code'] == 'validation_error'
+    assert 'Set --host and --port' in result['error']['message']

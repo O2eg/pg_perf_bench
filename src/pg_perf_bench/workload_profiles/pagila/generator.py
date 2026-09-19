@@ -19,7 +19,7 @@ def build_load_plan(scale: float) -> LoadPlan:
         raise ValueError('scale must be a finite number greater than zero')
     stores = max(2, round(2 * max(1.0, scale**0.5)))
     staff = stores
-    countries = scaled(109, scale, 10)
+    countries = 109
     cities = scaled(600, scale, 50)
     customers = scaled(600, scale, 100)
     addresses = stores + staff + customers
@@ -200,7 +200,7 @@ INSERT INTO film_actor (film_id, actor_id)
 INSERT INTO inventory (inventory_id, film_id, store_id)
         SELECT g,
             1 + floor(power(det_uniform(g, 3), 1.35) * {films})::bigint,
-            1 + ((g * 7 - 1) % {stores})
+            1 + ((g - 1) % {stores})
         FROM generate_series($1::bigint, $2::bigint) AS g;
         """,
             count=inventory,
@@ -214,8 +214,8 @@ INSERT INTO rental (rental_id, rental_date, inventory_id, customer_id, return_da
             rental_date,
             inventory_id,
             customer_id,
-            CASE WHEN g % 7 = 0 THEN NULL ELSE rental_date + (1 + g % 8) * INTERVAL '1 day' END,
-            1 + ((inventory_id - 1) % {staff})
+            rental_date + (1 + g % 8) * INTERVAL '1 day',
+            1 + ((inventory_id - 1) % {stores})
         FROM (
             SELECT
                 g,
@@ -239,8 +239,8 @@ WITH payment_keys AS (
                     SELECT payment_id, rental_id,
                         1 + floor(power(det_uniform(rental_id, 5),
             1.8) * {customers})::bigint AS customer_id,
-                        1 + ((floor(power(det_uniform(rental_id, 4),
-            1.25) * {inventory})::bigint) % {staff}) AS staff_id,
+                        1 + (floor(power(det_uniform(rental_id, 4),
+            1.25) * {inventory})::bigint % {stores}) AS staff_id,
                         TIMESTAMPTZ '2022-01-01 00:00:00+00'
                             + ((rental_id * 977) % (181 * 86400)) * INTERVAL '1 second' AS
             rental_date
@@ -250,8 +250,7 @@ WITH payment_keys AS (
             payment_date)
                 SELECT payment_id, customer_id, staff_id, rental_id,
                     round((0.99 + power(det_uniform(payment_id, 6), 2.2) * 12)::numeric, 2),
-                    LEAST(rental_date + (1 + payment_id % 72) * INTERVAL '1 hour',
-                        TIMESTAMPTZ '2022-06-30 23:50:00+00')
+                    rental_date + (1 + payment_id % 72) * INTERVAL '1 hour'
                         + (payment_id / {rentals}) * INTERVAL '1 microsecond'
                 FROM rentals_generated;
         """,
@@ -286,6 +285,11 @@ SELECT setval('pagila.film_film_id_seq', {films}, true);
 SELECT setval('pagila.inventory_inventory_id_seq', {inventory}, true);
 SELECT setval('pagila.rental_rental_id_seq', {rentals}, true);
 SELECT setval('pagila.payment_payment_id_seq', {payments}, true);
+-- Only the latest rental of a copy can remain open. Historical rows stay closed.
+UPDATE pagila.rental r SET return_date = NULL
+FROM (SELECT DISTINCT ON (inventory_id) rental_id
+      FROM pagila.rental ORDER BY inventory_id, rental_date DESC, rental_id DESC) latest
+WHERE r.rental_id = latest.rental_id AND r.rental_id % 7 = 0;
 DROP FUNCTION pagila.det_uniform(bigint, integer);""",
         finalize_sql=(root / 'sql/initialization-finalize.sql').read_text(),
     )

@@ -240,7 +240,7 @@ def stand(tmp_path):
     stand_bin = Path(
         os.environ.get(
             'PG_STAND_BIN',
-            '/home/oleg/Desktop/dev/pg_stand/.venv/bin/pg-stand',
+            str(Path(sys.executable).with_name('pg-stand')),
         )
     )
     if not stand_bin.is_file():
@@ -255,7 +255,7 @@ def stand(tmp_path):
     config['spec']['docker']['network_name'] = name + '-network-pg-stand-managed'
     node = config['spec']['nodes']['primary']
     node['container_name'] = name + '-primary-pg-stand-managed'
-    ports = _free_ports(5)
+    ports = _free_ports(4)
     for key, port in zip(
         [
             'published_port',
@@ -308,7 +308,7 @@ raise SystemExit(main())
         (root / '.pg_stand/known_hosts').write_text(
             f'[127.0.0.1]:{node["ssh_published_port"]} {public_key}\n'
         )
-        yield root, container, node, ports[4], password
+        yield root, container, node, password
     finally:
         _run([*stand_args, 'down', '--clear-data'], cwd=root)
         client.close()
@@ -378,10 +378,6 @@ def _arguments(root, node, *, transport, port, report_name, fast=False):
             str(root / '.pg_stand/credentials/ssh/pg_stand_test'),
             '--ssh-known-hosts',
             str(root / '.pg_stand/known_hosts'),
-            '--remote-pg-host',
-            '127.0.0.1',
-            '--remote-pg-port',
-            '5432',
         ]
     return args
 
@@ -398,7 +394,7 @@ def _check_report(text, *secrets):
 
 
 def test_patroni_benchmark_all_transports_and_plain_postgres(stand):
-    root, container, node, tunnel_port, password = stand
+    root, container, node, password = stand
     env = {**os.environ, 'PGPASSWORD': password}
     # The unmodified pg_stand image has no Patroni: exercise the original path.
     assert _detect(container) is None
@@ -528,7 +524,7 @@ def test_patroni_benchmark_all_transports_and_plain_postgres(stand):
 
     container.reload()
     container_start = container.attrs['State']['StartedAt']
-    for transport, port in [('docker', node['published_port']), ('ssh', tunnel_port)]:
+    for transport, port in [('docker', node['published_port']), ('ssh', node['published_port'])]:
         previous = _sql(container, 'select pg_postmaster_start_time()')
         name = 'patroni-' + transport
         _run(

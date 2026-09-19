@@ -39,7 +39,7 @@ def test_pg_stand_benchmark_smoke(tmp_path):
     pg_stand = Path(
         os.environ.get(
             'PG_STAND_BIN',
-            '/home/oleg/Desktop/dev/pg_stand/.venv/bin/pg-stand',
+            str(Path(sys.executable).with_name('pg-stand')),
         )
     )
     if not pg_stand.is_file():

@@ -65,7 +65,7 @@ selected target. The workload commands themselves run on the machine where
 |---|---|---|
 | `local` | local machine | local machine |
 | `docker` | existing container | local machine through a published port |
-| `ssh` | remote host | local machine through an SSH local-forwarding port |
+| `ssh` | remote host | local machine, direct TCP to PostgreSQL or a pooler |
 | `--managed` | PostgreSQL protocol only; no host transport | local machine through the managed endpoint |
 
 This separation keeps workload generation independent of target management and
@@ -228,6 +228,12 @@ Local and SSH hardware collectors invoke `sudo -n lshw`; Docker mode instead
 collects host inventory without sudo and keeps the target container's
 `pg_config` evidence separate. Raw interface state is retained, but runtime
 Docker bridges do not participate in the stable JOIN hardware identity.
+
+For legacy `lshw 02.18.x` (including Debian 11), hardware tables recover the
+known malformed `-class ... -json` output using the same narrow repairs as
+pg-diag. The fallback runs only after strict JSON parsing fails and only for
+`lshw_*.sh` collectors. An absent hardware class reported as `]` becomes an
+empty table; unrecoverable output still produces a collection error.
 
 ## Running a benchmark
 
@@ -701,10 +707,8 @@ The workload reaches PostgreSQL through the port published on `--host` and
 --ssh-user postgres \
 --ssh-key /secure/path/id_ed25519 \
 --ssh-known-hosts /secure/path/known_hosts \
---remote-pg-host 127.0.0.1 \
---remote-pg-port 5432 \
---host 127.0.0.1 \
---port 55432
+--host db-host.example \
+--port 5432
 ```
 
 To use an identity already loaded into a local agent, replace `--ssh-key` with
@@ -721,10 +725,8 @@ pg-perf-bench collect-all-info \
   --ssh-user postgres \
   --ssh-agent \
   --ssh-known-hosts /secure/path/known_hosts \
-  --remote-pg-host 127.0.0.1 \
-  --remote-pg-port 5432 \
-  --host 127.0.0.1 \
-  --port 55432 \
+  --host db-host.example \
+  --port 5432 \
   --database appdb \
   --pg-bin-path /usr/lib/postgresql/18/bin
 ```
@@ -736,11 +738,15 @@ agent, run `ssh-add`, or forward the agent to the remote host. Both modes use
 explicit public-key authentication and the selected `known_hosts` policy
 without loading the user's OpenSSH configuration.
 
-For database modes, `--host` and `--port` are the local bind address and
-free port. `--remote-pg-host` and `--remote-pg-port` identify PostgreSQL from
-the SSH server. Host commands run remotely; `asyncpg`, `pgbench`, and `psql`
-connect through native AsyncSSH local forwarding. No `AcceptEnv` change is
-required on the SSH server.
+For database modes, `--host` and `--port` are the PostgreSQL or pooler endpoint
+reachable directly from the load-generator host. `asyncpg`, `pgbench`, and `psql`
+connect to this endpoint directly. `--ssh-host` selects the host for OS metrics,
+host commands and lifecycle operations; it can differ from the SQL endpoint.
+AsyncSSH does not forward database traffic. No `AcceptEnv` change is required.
+
+Older commands using `--remote-pg-host` or `--remote-pg-port` fail with a migration
+message before connecting. Remove those options and replace the former local
+bind address/port with the directly reachable database endpoint.
 
 ## Report contents
 

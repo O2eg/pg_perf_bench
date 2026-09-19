@@ -1,7 +1,7 @@
 set search_path = 'imdb';
 
 BEGIN;
-SELECT MIN(mi_idx.info) AS rating,
+SELECT MIN(mi_idx.info::numeric) AS rating,
        MIN(t.title) AS northern_dark_movie
 FROM info_type AS it1,
      info_type AS it2,
@@ -28,7 +28,7 @@ WHERE it1.info = 'countries'
                   'German',
                   'USA',
                   'American')
-  AND mi_idx.info < '8.5'
+  AND mi_idx.info::numeric < '8.5'
   AND t.production_year > 2010
   AND kt.id = t.kind_id
   AND t.id = mi.movie_id
@@ -44,7 +44,7 @@ WHERE it1.info = 'countries'
 COMMIT;
 
 BEGIN;
-SELECT MIN(mi_idx.info) AS rating,
+SELECT MIN(mi_idx.info::numeric) AS rating,
        MIN(t.title) AS western_dark_production
 FROM info_type AS it1,
      info_type AS it2,
@@ -69,7 +69,7 @@ WHERE it1.info = 'countries'
                   'German',
                   'USA',
                   'American')
-  AND mi_idx.info > '6.0'
+  AND mi_idx.info::numeric > '6.0'
   AND t.production_year > 2010
   AND (t.title LIKE '%murder%'
        OR t.title LIKE '%Murder%'
@@ -88,7 +88,7 @@ WHERE it1.info = 'countries'
 COMMIT;
 
 BEGIN;
-SELECT MIN(mi_idx.info) AS rating,
+SELECT MIN(mi_idx.info::numeric) AS rating,
        MIN(t.title) AS north_european_dark_production
 FROM info_type AS it1,
      info_type AS it2,
@@ -117,7 +117,7 @@ WHERE it1.info = 'countries'
                   'German',
                   'USA',
                   'American')
-  AND mi_idx.info < '8.5'
+  AND mi_idx.info::numeric < '8.5'
   AND t.production_year > 2005
   AND kt.id = t.kind_id
   AND t.id = mi.movie_id

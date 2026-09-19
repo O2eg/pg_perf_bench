@@ -1,8 +1,8 @@
 set search_path = 'imdb';
 
 BEGIN;
-SELECT MIN(mi.info) AS movie_budget,
-       MIN(mi_idx.info) AS movie_votes,
+SELECT MIN(mi.info) AS movie_genre,
+       MIN(mi_idx.info::numeric) AS movie_votes,
        MIN(n.name) AS writer,
        MIN(t.title) AS complete_violent_movie
 FROM complete_cast AS cc,
@@ -63,8 +63,8 @@ WHERE cct1.kind IN ('cast',
 COMMIT;
 
 BEGIN;
-SELECT MIN(mi.info) AS movie_budget,
-       MIN(mi_idx.info) AS movie_votes,
+SELECT MIN(mi.info) AS movie_genre,
+       MIN(mi_idx.info::numeric) AS movie_votes,
        MIN(n.name) AS writer,
        MIN(t.title) AS complete_gore_movie
 FROM complete_cast AS cc,
@@ -128,8 +128,8 @@ WHERE cct1.kind IN ('cast',
 COMMIT;
 
 BEGIN;
-SELECT MIN(mi.info) AS movie_budget,
-       MIN(mi_idx.info) AS movie_votes,
+SELECT MIN(mi.info) AS movie_genre,
+       MIN(mi_idx.info::numeric) AS movie_votes,
        MIN(n.name) AS writer,
        MIN(t.title) AS complete_violent_movie
 FROM complete_cast AS cc,

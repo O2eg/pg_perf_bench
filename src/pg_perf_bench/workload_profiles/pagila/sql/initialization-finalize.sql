@@ -16,4 +16,12 @@ SELECT
     (SELECT max(address_id) FROM pagila.address) AS max_address,
     (SELECT max(city_id) FROM pagila.city) AS max_city,
     (SELECT max(category_id) FROM pagila.category) AS max_category,
-    (SELECT max(language_id) FROM pagila.language) AS max_language;
+    (SELECT max(language_id) FROM pagila.language) AS max_language,
+    bounds.data_start_epoch, bounds.data_days,
+    LEAST(30, bounds.data_days) AS report_window_days
+FROM (
+    SELECT extract(epoch FROM TIMESTAMPTZ '2022-01-01 00:00:00+00')::bigint AS data_start_epoch,
+           GREATEST(1, floor(extract(epoch FROM (max(rental_date)
+               - TIMESTAMPTZ '2022-01-01 00:00:00+00')) / 86400)::integer + 1) AS data_days
+    FROM pagila.rental
+) AS bounds;

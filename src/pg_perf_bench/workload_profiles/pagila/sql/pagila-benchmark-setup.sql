@@ -15,6 +15,29 @@ CREATE INDEX payment_p2022_05_rental_id_idx ON pagila.payment_p2022_05 USING btr
 CREATE INDEX payment_p2022_06_rental_id_idx ON pagila.payment_p2022_06 USING btree (rental_id);
 CREATE INDEX payment_p2022_07_rental_id_idx ON pagila.payment_p2022_07 USING btree (rental_id);
 
+-- Selective OLTP and store/period reporting access paths.
+CREATE INDEX rental_customer_date_idx ON pagila.rental (customer_id, rental_date DESC);
+CREATE INDEX rental_staff_date_idx ON pagila.rental (staff_id, rental_date, inventory_id);
+CREATE UNIQUE INDEX rental_open_inventory_idx ON pagila.rental (inventory_id) WHERE return_date IS NULL;
+CREATE INDEX rental_open_customer_idx ON pagila.rental (customer_id, rental_date) WHERE return_date IS NULL;
+CREATE INDEX inventory_film_store_idx ON pagila.inventory (film_id, store_id, inventory_id);
+CREATE INDEX staff_store_idx ON pagila.staff (store_id, staff_id);
+CREATE INDEX film_category_category_film_idx ON pagila.film_category (category_id, film_id);
+CREATE INDEX payment_p2022_01_staff_date_idx ON pagila.payment_p2022_01 (staff_id, payment_date, rental_id);
+CREATE INDEX payment_p2022_01_customer_date_idx ON pagila.payment_p2022_01 (customer_id, payment_date DESC, payment_id DESC);
+CREATE INDEX payment_p2022_02_staff_date_idx ON pagila.payment_p2022_02 (staff_id, payment_date, rental_id);
+CREATE INDEX payment_p2022_02_customer_date_idx ON pagila.payment_p2022_02 (customer_id, payment_date DESC, payment_id DESC);
+CREATE INDEX payment_p2022_03_staff_date_idx ON pagila.payment_p2022_03 (staff_id, payment_date, rental_id);
+CREATE INDEX payment_p2022_03_customer_date_idx ON pagila.payment_p2022_03 (customer_id, payment_date DESC, payment_id DESC);
+CREATE INDEX payment_p2022_04_staff_date_idx ON pagila.payment_p2022_04 (staff_id, payment_date, rental_id);
+CREATE INDEX payment_p2022_04_customer_date_idx ON pagila.payment_p2022_04 (customer_id, payment_date DESC, payment_id DESC);
+CREATE INDEX payment_p2022_05_staff_date_idx ON pagila.payment_p2022_05 (staff_id, payment_date, rental_id);
+CREATE INDEX payment_p2022_05_customer_date_idx ON pagila.payment_p2022_05 (customer_id, payment_date DESC, payment_id DESC);
+CREATE INDEX payment_p2022_06_staff_date_idx ON pagila.payment_p2022_06 (staff_id, payment_date, rental_id);
+CREATE INDEX payment_p2022_06_customer_date_idx ON pagila.payment_p2022_06 (customer_id, payment_date DESC, payment_id DESC);
+CREATE INDEX payment_p2022_07_staff_date_idx ON pagila.payment_p2022_07 (staff_id, payment_date, rental_id);
+CREATE INDEX payment_p2022_07_customer_date_idx ON pagila.payment_p2022_07 (customer_id, payment_date DESC, payment_id DESC);
+
 -- Pagila functions reference tables without a schema; make every new session resolve them
 -- instead of paying for a SET per transaction. The database-level default covers ad-hoc
 -- sessions; the role-in-database setting takes precedence over an ALTER ROLE ... SET
@@ -47,7 +70,15 @@ SELECT
     (SELECT max(address_id) FROM pagila.address) AS max_address,
     (SELECT max(city_id) FROM pagila.city) AS max_city,
     (SELECT max(category_id) FROM pagila.category) AS max_category,
-    (SELECT max(language_id) FROM pagila.language) AS max_language;
+    (SELECT max(language_id) FROM pagila.language) AS max_language,
+    bounds.data_start_epoch, bounds.data_days,
+    LEAST(30, bounds.data_days) AS report_window_days
+FROM (
+    SELECT extract(epoch FROM TIMESTAMPTZ '2022-01-01 00:00:00+00')::bigint AS data_start_epoch,
+           GREATEST(1, floor(extract(epoch FROM (max(rental_date)
+               - TIMESTAMPTZ '2022-01-01 00:00:00+00')) / 86400)::integer + 1) AS data_days
+    FROM pagila.rental
+) AS bounds;
 
 
 -- Freeze and analyze so the first measured transactions do not pay for hint-bit writes or

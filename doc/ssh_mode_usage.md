@@ -2,14 +2,15 @@
 
 Use SSH transport when PostgreSQL and host fact collection run on a remote
 server while `pg_perf_bench`, `pgbench`, and `psql` run locally. The transport
-uses AsyncSSH and native local port forwarding; `sshtunnel` and server-side
+uses AsyncSSH for remote host operations. SQL connects directly over TCP from
+the load-generator host; there is no database port forwarding. Server-side
 `AcceptEnv` changes are not required.
 
 ## Execution boundary
 
 | Operation | Location |
 |---|---|
-| PostgreSQL connection | local forwarded port |
+| PostgreSQL connection | direct TCP from the load generator to `--host:--port` |
 | `pgbench` and `psql` | local workload-generator host |
 | Host fact collectors | remote host |
 | Timed `pg_diag` OS sampler | remote host |
@@ -50,14 +51,23 @@ disposable stands.
 
 ## Address model
 
-SSH database modes use two address pairs:
+SSH mode separates the SQL endpoint from the host-management endpoint:
 
-- `--host` and `--port` define a free local bind address and port;
-- `--remote-pg-host` and `--remote-pg-port` identify PostgreSQL as seen from
-  the SSH server.
+- `--host` and `--port` identify PostgreSQL or a pooler reachable directly from
+  the machine running `pg-perf-bench`;
+- `--ssh-host` and `--ssh-port` identify the database host used for OS metrics,
+  fact collection and lifecycle operations.
 
-`asyncpg`, `pgbench`, and `psql` connect to the local pair. AsyncSSH forwards
-that traffic to the remote pair. The local port must not already be in use.
+`asyncpg`, `pgbench`, and `psql` use the SQL endpoint directly. This keeps SSH
+forwarding and encryption out of the measured database traffic. The endpoints
+can differ, for example when SQL goes through HAProxy/PgBouncer while metrics
+are collected on the primary. Select the SSH host corresponding to the database
+server whose OS metrics you intend to measure.
+
+The former `--remote-pg-host` and `--remote-pg-port` options are rejected before
+any connection is made. To migrate, remove both options and replace the old
+local bind address and port with the SQL endpoint reachable from the generator.
+A working SSH login alone does not establish database network access.
 
 ## Read-only collection
 
@@ -68,18 +78,16 @@ PGPASSWORD=secret pg-perf-bench collect-all-info \
   --ssh-user postgres \
   --ssh-key ~/.ssh/pg_perf_bench \
   --ssh-known-hosts ~/.ssh/known_hosts \
-  --remote-pg-host 127.0.0.1 \
-  --remote-pg-port 5432 \
-  --host 127.0.0.1 \
-  --port 55432 \
+  --host db-host.example \
+  --port 5432 \
   --user postgres \
   --database postgres \
   --pg-bin-path /usr/lib/postgresql/18/bin \
   --report-name ssh-facts
 ```
 
-Collection opens the tunnel and runs remote fact commands, but does not stop
-PostgreSQL or install a configuration file.
+Collection opens a direct SQL connection and runs host fact commands over SSH.
+It does not stop PostgreSQL or install a configuration file.
 
 ## Benchmark
 
@@ -91,10 +99,8 @@ PGPASSWORD=secret pg-perf-bench benchmark \
   --ssh-user postgres \
   --ssh-key ~/.ssh/pg_perf_bench \
   --ssh-known-hosts ~/.ssh/known_hosts \
-  --remote-pg-host 127.0.0.1 \
-  --remote-pg-port 5432 \
-  --host 127.0.0.1 \
-  --port 55432 \
+  --host db-host.example \
+  --port 5432 \
   --user postgres \
   --database pg_perf_bench_test \
   --pg-data-path /var/lib/postgresql/18/main \
@@ -120,8 +126,7 @@ and use a bundled profile instead:
 PGPASSWORD=secret pg-perf-bench benchmark \
   --connection-type ssh --ssh-host db-host.example --ssh-user postgres \
   --ssh-key ~/.ssh/pg_perf_bench --ssh-known-hosts ~/.ssh/known_hosts \
-  --remote-pg-host 127.0.0.1 --remote-pg-port 5432 \
-  --host 127.0.0.1 --port 55432 --user postgres \
+  --host db-host.example --port 5432 --user postgres \
   --pg-data-path /var/lib/postgresql/18/main \
   --pg-bin-path /usr/lib/postgresql/18/bin \
   --database pg_perf_bench_test --allow-database-reset --reset-mode schema \
@@ -163,7 +168,7 @@ and atomically renamed to the remote cluster's `postgresql.conf` before the rese
 sudo rule. Hardware collectors use `sudo -n` and fail fast when permission is
 not available.
 
-The load commands always execute locally through the tunnel. The newest local
+The load commands always execute locally using the direct SQL endpoint. The newest local
 pgbench is selected automatically even when the remote server is PostgreSQL
 10–18. Concurrent CPU, RAM, disk, and network sampling executes on the remote
 database host through the already authenticated SSH session.
@@ -176,7 +181,6 @@ database host through the already authenticated SSH session.
   permissions, and the installed public key;
 - authentication failure in agent mode: verify `SSH_AUTH_SOCK`, `ssh-add -l`,
   the agent lifetime, and the installed public key;
-- local bind failure: choose an unused `--port`;
-- PostgreSQL connection failure with working SSH: verify the remote address,
-  PostgreSQL authentication, and listen rules;
+- PostgreSQL connection failure with working SSH: verify reachability of
+  `--host:--port` from the generator, PostgreSQL authentication and listen rules;
 - lifecycle failure: ensure `--ssh-user` owns or can control the cluster.

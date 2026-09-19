@@ -69,3 +69,19 @@ def test_ssh_timeout_is_reported_as_timeout_error():
 
     with pytest.raises(TimeoutError, match='timed out'):
         asyncio.run(connection.run_command('sleep 10'))
+
+
+def test_ssh_transport_rejects_obsolete_tunnel_configuration():
+    with pytest.raises(TypeError, match='tunnel_params'):
+        SSHConnection({'host': 'db.example'}, tunnel_params={'local_port': 5433})
+
+
+@pytest.mark.parametrize('context_name', ['Context', 'CollectInfoContext'])
+def test_legacy_contexts_reject_removed_tunnel_arguments(context_name):
+    from argparse import Namespace
+
+    from pg_perf_bench import context
+    from pg_perf_bench.errors import ConfigurationError
+
+    with pytest.raises(ConfigurationError, match='port forwarding has been removed'):
+        getattr(context, context_name)(Namespace(remote_pg_host='127.0.0.1'), MagicMock())

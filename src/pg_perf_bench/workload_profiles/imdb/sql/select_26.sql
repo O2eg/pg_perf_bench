@@ -2,7 +2,7 @@ set search_path = 'imdb';
 
 BEGIN;
 SELECT MIN(chn.name) AS character_name,
-       MIN(mi_idx.info) AS rating,
+       MIN(mi_idx.info::numeric) AS rating,
        MIN(n.name) AS playing_actor,
        MIN(t.title) AS complete_hero_movie
 FROM complete_cast AS cc,
@@ -34,7 +34,7 @@ WHERE cct1.kind = 'cast'
                     'claw',
                     'laser')
   AND kt.kind = 'movie'
-  AND mi_idx.info > '7.0'
+  AND mi_idx.info::numeric > '7.0'
   AND t.production_year > 2000
   AND kt.id = t.kind_id
   AND t.id = mk.movie_id
@@ -58,7 +58,7 @@ COMMIT;
 
 BEGIN;
 SELECT MIN(chn.name) AS character_name,
-       MIN(mi_idx.info) AS rating,
+       MIN(mi_idx.info::numeric) AS rating,
        MIN(t.title) AS complete_hero_movie
 FROM complete_cast AS cc,
      comp_cast_type AS cct1,
@@ -83,7 +83,7 @@ WHERE cct1.kind = 'cast'
                     'based-on-comic',
                     'fight')
   AND kt.kind = 'movie'
-  AND mi_idx.info > '8.0'
+  AND mi_idx.info::numeric > '8.0'
   AND t.production_year > 2005
   AND kt.id = t.kind_id
   AND t.id = mk.movie_id
@@ -107,7 +107,7 @@ COMMIT;
 
 BEGIN;
 SELECT MIN(chn.name) AS character_name,
-       MIN(mi_idx.info) AS rating,
+       MIN(mi_idx.info::numeric) AS rating,
        MIN(t.title) AS complete_hero_movie
 FROM complete_cast AS cc,
      comp_cast_type AS cct1,

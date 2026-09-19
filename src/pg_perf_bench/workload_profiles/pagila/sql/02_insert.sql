@@ -1,4 +1,4 @@
--- pagila OLTP: write transactions. Every transaction records a rental with its payment;
+-- pagila OLTP: write transactions. An available copy is rented with its payment;
 -- customer registration, catalogue and staff changes are gated by pgbench-side
 -- probabilities, so the mix stays shop-like and reproducible under --random-seed. Dates
 -- stay inside the 2022 payment partitions (2022-01-01 .. 2022-07-31).
@@ -15,7 +15,7 @@ SELECT * FROM bench_bounds \gset
 \set city_id random(1, :max_city)
 \set language_id random(1, :max_language)
 \set address_id random(1, :max_address)
-\set day random(0, 200)
+\set day random(0, :data_days - 1)
 \set sec random(0, 86399)
 \set hours random(1, 72)
 \set suffix random(1, 1000000)
@@ -27,31 +27,29 @@ SELECT * FROM bench_bounds \gset
 \set chance_staff random(1, 1000)
 \set chance_store random(1, 1000)
 
--- New rental with its payment. ON CONFLICT keeps a replayed seed (same database, same
--- --random-seed) from aborting the client; pg_perf_bench recreates the database anyway.
+-- Rental attempt: unavailable or concurrently locked copies are skipped. The partial
+-- unique index also prevents races from creating two open rentals for one copy.
 BEGIN;
-WITH new_rental AS (
+WITH available AS (
+    SELECT i.inventory_id, s.manager_staff_id AS staff_id
+    FROM inventory i JOIN store s ON s.store_id = i.store_id
+    WHERE i.inventory_id = :inventory_id
+      AND NOT EXISTS (SELECT 1 FROM rental r WHERE r.inventory_id = i.inventory_id
+                                              AND r.return_date IS NULL)
+    FOR UPDATE OF i SKIP LOCKED
+), new_rental AS (
     INSERT INTO rental (rental_date, inventory_id, customer_id, staff_id)
-    VALUES (
-        TIMESTAMPTZ '2022-01-01 00:00:00+00' + make_interval(days => :day, secs => :sec),
-        :inventory_id,
-        :customer_id,
-        :staff_id
-    )
-    ON CONFLICT (rental_date, inventory_id, customer_id) DO NOTHING
-    RETURNING rental_id, rental_date
+    SELECT to_timestamp(:data_start_epoch + :day * 86400 + :sec),
+           inventory_id, :customer_id::bigint, staff_id FROM available
+    ON CONFLICT DO NOTHING
+    RETURNING rental_id, rental_date, staff_id
 )
 INSERT INTO payment (customer_id, staff_id, rental_id, amount, payment_date)
-SELECT
-    :customer_id::bigint,
-    :staff_id::bigint,
-    nr.rental_id,
-    (SELECT f.rental_rate
-     FROM inventory i
-     JOIN film f ON f.film_id = i.film_id
-     WHERE i.inventory_id = :inventory_id),
-    nr.rental_date + make_interval(hours => :hours)
-FROM new_rental AS nr;
+SELECT :customer_id::bigint, nr.staff_id, nr.rental_id,
+       (SELECT f.rental_rate FROM inventory i JOIN film f ON f.film_id = i.film_id
+        WHERE i.inventory_id = :inventory_id),
+       nr.rental_date + make_interval(hours => :hours)
+FROM new_rental nr;
 COMMIT;
 
 -- New customer with address (one transaction in ten)
@@ -77,7 +75,7 @@ SELECT
     'customer' || :suffix || '@example.test',
     na.address_id,
     true,
-    (TIMESTAMPTZ '2022-01-01 00:00:00+00' + make_interval(days => :day))::date,
+    (to_timestamp(:data_start_epoch + :day * 86400))::date,
     1
 FROM new_address AS na;
 COMMIT;
@@ -165,10 +163,13 @@ WITH new_staff AS (
     ORDER BY staff_id
     LIMIT 1
     FOR UPDATE SKIP LOCKED
+), new_store AS (
+    INSERT INTO store (manager_staff_id, address_id)
+    SELECT staff_id, :address_id::bigint FROM new_staff
+    ON CONFLICT (manager_staff_id) DO NOTHING
+    RETURNING store_id, manager_staff_id
 )
-INSERT INTO store (manager_staff_id, address_id)
-SELECT staff_id, :address_id::bigint
-FROM new_staff
-ON CONFLICT (manager_staff_id) DO NOTHING;
+UPDATE staff SET store_id = new_store.store_id
+FROM new_store WHERE staff.staff_id = new_store.manager_staff_id;
 COMMIT;
 \endif

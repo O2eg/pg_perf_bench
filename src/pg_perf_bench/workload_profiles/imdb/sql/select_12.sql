@@ -2,7 +2,7 @@ set search_path = 'imdb';
 
 BEGIN;
 SELECT MIN(cn.name) AS movie_company,
-       MIN(mi_idx.info) AS rating,
+       MIN(mi_idx.info::numeric) AS rating,
        MIN(t.title) AS drama_horror_movie
 FROM company_name AS cn,
      company_type AS ct,
@@ -18,7 +18,7 @@ WHERE cn.country_code = '[us]'
   AND it2.info = 'rating'
   AND mi.info IN ('Drama',
                   'Horror')
-  AND mi_idx.info > '8.0'
+  AND mi_idx.info::numeric > '8.0'
   AND t.production_year BETWEEN 2005 AND 2008
   AND t.id = mi.movie_id
   AND t.id = mi_idx.movie_id
@@ -34,7 +34,7 @@ WHERE cn.country_code = '[us]'
 COMMIT;
 
 BEGIN;
-SELECT MIN(mi.info) AS budget,
+SELECT MIN(CASE WHEN mi.info_type_id = 6 THEN substr(mi.info, 2)::numeric END) AS budget,
        MIN(t.title) AS unsuccsessful_movie
 FROM company_name AS cn,
      company_type AS ct,
@@ -68,7 +68,7 @@ COMMIT;
 
 BEGIN;
 SELECT MIN(cn.name) AS movie_company,
-       MIN(mi_idx.info) AS rating,
+       MIN(mi_idx.info::numeric) AS rating,
        MIN(t.title) AS mainstream_movie
 FROM company_name AS cn,
      company_type AS ct,
@@ -86,7 +86,7 @@ WHERE cn.country_code = '[us]'
                   'Horror',
                   'Western',
                   'Family')
-  AND mi_idx.info > '7.0'
+  AND mi_idx.info::numeric > '7.0'
   AND t.production_year BETWEEN 2000 AND 2010
   AND t.id = mi.movie_id
   AND t.id = mi_idx.movie_id

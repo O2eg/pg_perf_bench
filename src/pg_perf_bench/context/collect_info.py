@@ -30,18 +30,6 @@ class CollectInfoContext(BaseContext):
         # Add connection configuration
         self._add_connection_config(args)
 
-        # Add SSH tunnel if needed for DB or ALL info
-        if args.connection_type == ConnectionType.SSH and args.mode in {
-            WorkMode.COLLECT_DB_INFO,
-            WorkMode.COLLECT_ALL_INFO,
-        }:
-            self.structured_params['conn_conf']['tunnel_params'] = {
-                'remote_host': args.remote_pg_host,
-                'remote_port': int(args.remote_pg_port),
-                'local_host': args.pg_host,
-                'local_port': int(args.pg_port),
-            }
-
         # Add database configuration
         self.structured_params['db_conf'] = {
             'db_conn_params': {
@@ -96,8 +84,6 @@ class CollectInfoContext(BaseContext):
                     raise ValueError(
                         f'Parameter "{transform_key(key)}" must be specified for DB connection'
                     )
-            SSHConnectionArgs.append('remote_pg_host')
-            SSHConnectionArgs.append('remote_pg_port')
 
         ctype = d.get('connection_type')
         if ctype == ConnectionType.SSH:

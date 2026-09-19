@@ -15,6 +15,7 @@ from pg_perf_bench.const import (
 from pg_perf_bench.contracts import redact_mapping
 from pg_perf_bench.managed import mark_managed_unavailable
 from pg_perf_bench.pgbench_metrics import LEGACY_METRIC_KEYS
+from pg_perf_bench.report.lshw import parse_legacy_lshw_json
 from pg_perf_bench.report.processing import parse_json_in_order
 
 
@@ -56,6 +57,18 @@ async def _run_transport_command(conn, script: str, item: dict) -> str:
     return await conn.run_command(script, True, timeout=timeout)
 
 
+def _parse_shell_json(data: str, shell_command_file: str):
+    try:
+        return json.loads(data)
+    except json.JSONDecodeError:
+        if shell_command_file.startswith('lshw_') and shell_command_file.endswith('.sh'):
+            try:
+                return parse_legacy_lshw_json(data)
+            except json.JSONDecodeError:
+                pass
+        raise
+
+
 async def run_shell_command(logger, conn, item):
     # check necessary fields in item
     shell_cmd_file = item.get('shell_command_file')
@@ -90,7 +103,7 @@ async def run_shell_command(logger, conn, item):
         try:
             data_str = await _run_transport_command(conn, raw_script_text, item)
             try:
-                data = json.loads(data_str)
+                data = _parse_shell_json(data_str, shell_cmd_file)
             except json.JSONDecodeError as e:
                 logger.debug(f'Error parsing JSON for table report:\n{e}')
                 item['data'] = f'Error parsing JSON for table report: {e}'

@@ -3,8 +3,8 @@ set search_path = 'imdb';
 BEGIN;
 SELECT MIN(cn1.name) AS first_company,
        MIN(cn2.name) AS second_company,
-       MIN(mi_idx1.info) AS first_rating,
-       MIN(mi_idx2.info) AS second_rating,
+       MIN(mi_idx1.info::numeric) AS first_rating,
+       MIN(mi_idx2.info::numeric) AS second_rating,
        MIN(t1.title) AS first_movie,
        MIN(t2.title) AS second_movie
 FROM company_name AS cn1,
@@ -29,7 +29,7 @@ WHERE cn1.country_code = '[us]'
   AND lt.link IN ('sequel',
                   'follows',
                   'followed by')
-  AND mi_idx2.info < '3.0'
+  AND mi_idx2.info::numeric < '3.0'
   AND t2.production_year BETWEEN 2005 AND 2008
   AND lt.id = ml.link_type_id
   AND t1.id = ml.movie_id
@@ -56,8 +56,8 @@ COMMIT;
 BEGIN;
 SELECT MIN(cn1.name) AS first_company,
        MIN(cn2.name) AS second_company,
-       MIN(mi_idx1.info) AS first_rating,
-       MIN(mi_idx2.info) AS second_rating,
+       MIN(mi_idx1.info::numeric) AS first_rating,
+       MIN(mi_idx2.info::numeric) AS second_rating,
        MIN(t1.title) AS first_movie,
        MIN(t2.title) AS second_movie
 FROM company_name AS cn1,
@@ -80,7 +80,7 @@ WHERE cn1.country_code = '[nl]'
   AND kt1.kind IN ('tv series')
   AND kt2.kind IN ('tv series')
   AND lt.link LIKE '%follow%'
-  AND mi_idx2.info < '3.0'
+  AND mi_idx2.info::numeric < '3.0'
   AND t2.production_year = 2007
   AND lt.id = ml.link_type_id
   AND t1.id = ml.movie_id
@@ -107,8 +107,8 @@ COMMIT;
 BEGIN;
 SELECT MIN(cn1.name) AS first_company,
        MIN(cn2.name) AS second_company,
-       MIN(mi_idx1.info) AS first_rating,
-       MIN(mi_idx2.info) AS second_rating,
+       MIN(mi_idx1.info::numeric) AS first_rating,
+       MIN(mi_idx2.info::numeric) AS second_rating,
        MIN(t1.title) AS first_movie,
        MIN(t2.title) AS second_movie
 FROM company_name AS cn1,
@@ -135,7 +135,7 @@ WHERE cn1.country_code != '[us]'
   AND lt.link IN ('sequel',
                   'follows',
                   'followed by')
-  AND mi_idx2.info < '3.5'
+  AND mi_idx2.info::numeric < '3.5'
   AND t2.production_year BETWEEN 2000 AND 2010
   AND lt.id = ml.link_type_id
   AND t1.id = ml.movie_id

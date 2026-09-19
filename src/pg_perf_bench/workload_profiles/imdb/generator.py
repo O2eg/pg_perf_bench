@@ -14,6 +14,13 @@ def scaled(base: int, scale: float, minimum: int) -> int:
     return max(minimum, round(base * scale))
 
 
+def coprime_stride(preferred: int, cardinality: int) -> int:
+    """A modular permutation must visit every key, including fractional scales."""
+    while math.gcd(preferred, cardinality) != 1:
+        preferred += 1
+    return preferred
+
+
 def build_load_plan(scale: float) -> LoadPlan:
     if not math.isfinite(scale) or scale <= 0:
         raise ValueError('scale must be a finite number greater than zero')
@@ -25,9 +32,13 @@ def build_load_plan(scale: float) -> LoadPlan:
     cast_rows = scaled(600_000, scale, titles * 3)
     keyword_rows = scaled(300_000, scale, titles * 2)
     company_rows = scaled(150_000, scale, titles)
-    info_rows = scaled(250_000, scale, titles * 2)
-    info_index_rows = scaled(300_000, scale, titles * 3)
+    info_rows = titles * 4
+    info_index_rows = titles * 2
     movie_links = scaled(100_000, scale, titles)
+
+    cast_stride = coprime_stride(65537, titles)
+    company_stride = coprime_stride(32771, titles)
+    info_stride = coprime_stride(8191, titles)
 
     data = (
         LoadTask(
@@ -136,7 +147,8 @@ INSERT INTO company_name
                 WHEN 8 THEN '[nl]'
                 WHEN 9 THEN '[sm]'
                 WHEN 10 THEN '[ru]'
-                ELSE '[us]'
+                ELSE (ARRAY['[us]', '[us]', '[us]', '[us]', '[us]', '[de]',
+                            '[jp]', '[pl]', '[nl]', '[sm]', '[ru]'])[1 + g % 11]
             END,
             100000 + g,
             left(md5('company-nf-' || g), 5),
@@ -333,7 +345,10 @@ INSERT INTO title
                 ELSE 'Synthetic Title ' || g
             END,
             CASE WHEN g % 9 = 0 THEN 'T' || g ELSE NULL END,
-            CASE WHEN g IN (17, 18) THEN 2 WHEN g % 23 = 0 THEN 3 ELSE 1 END,
+            CASE WHEN g IN (17, 18) THEN 2 WHEN g <= 22 THEN 1
+                 WHEN g % 20 = 3 THEN 2 WHEN g % 20 IN (4, 5) THEN 3
+                 WHEN g % 20 = 6 THEN 4 WHEN g % 20 = 7 THEN 5
+                 WHEN g % 20 = 8 THEN 6 WHEN g % 20 = 9 THEN 7 ELSE 1 END,
             CASE g
                 WHEN 1 THEN 2016 WHEN 2 THEN 2007 WHEN 3 THEN 2006 WHEN 4 THEN 2009
                 WHEN 5 THEN 2008 WHEN 6 THEN 2007 WHEN 7 THEN 2016 WHEN 8 THEN 2007
@@ -341,13 +356,16 @@ INSERT INTO title
                 WHEN 13 THEN 2008 WHEN 14 THEN 2009 WHEN 15 THEN 2015 WHEN 16 THEN 2004
                 WHEN 17 THEN 2006 WHEN 18 THEN 2007 WHEN 19 THEN 1982 WHEN 20 THEN 2016
                 WHEN 21 THEN 1998 WHEN 22 THEN 2008
-                ELSE 1950 + (g * 17) % 73
+                ELSE CASE WHEN g % 20 IN (4, 5)
+                    THEN LEAST(2022, 1950 + (((g / 20) * 20 + 3) * 17) % 73 + g % 20 - 4)
+                    ELSE 1950 + (g * 17) % 73 END
             END,
             400000 + g,
             left(md5('title-' || g), 5),
-            NULL::bigint,
-            NULL::integer,
-            CASE WHEN g = 1 THEN 60 ELSE NULL END,
+            CASE WHEN g > 22 AND g % 20 IN (4, 5) THEN (g / 20) * 20 + 3 ELSE NULL END,
+            CASE WHEN g > 22 AND g % 20 IN (4, 5) THEN 1 ELSE NULL END,
+            CASE WHEN g > 22 AND g % 20 IN (4, 5)
+                 THEN 1 + ((g / 20) * 2 + g % 20 - 4) % 99 ELSE NULL END,
             NULL,
             md5('title-' || g)
         FROM generate_series($1::bigint, $2::bigint) AS g;
@@ -357,72 +375,15 @@ INSERT INTO title
         LoadTask(
             'aka_title',
             """
-WITH generated_source (id, title, imdb_index, kind_id, production_year, imdb_id, phonetic_code,
-            episode_of_id, season_nr, episode_nr, series_years, md5sum) AS (SELECT
-            g AS id,
-            CASE g
-                WHEN 1 THEN 'Synthetic Hero Movie'
-                WHEN 2 THEN 'One Piece Synthetic Feature'
-                WHEN 3 THEN 'Dragon Ball Z Synthetic Feature'
-                WHEN 4 THEN 'Birdemic Synthetic Movie'
-                WHEN 5 THEN 'Champion Synthetic Movie'
-                WHEN 6 THEN 'Loser Synthetic Movie'
-                WHEN 7 THEN 'Murder Synthetic Movie'
-                WHEN 8 THEN 'YouTube Synthetic Movie'
-                WHEN 9 THEN 'Kung Fu Panda Synthetic Feature'
-                WHEN 10 THEN 'Iron Man Synthetic Feature'
-                WHEN 11 THEN 'Sherlock Synthetic Feature'
-                WHEN 12 THEN 'Saw Synthetic Horror'
-                WHEN 13 THEN 'Freddy Synthetic Horror'
-                WHEN 14 THEN 'Jason Synthetic Horror'
-                WHEN 15 THEN 'Vampire Synthetic Horror'
-                WHEN 16 THEN 'Shrek 2'
-                WHEN 17 THEN 'Synthetic TV Series First'
-                WHEN 18 THEN 'Synthetic TV Series Second'
-                WHEN 19 THEN 'Synthetic Biography'
-                WHEN 20 THEN 'Synthetic VHS Movie'
-                WHEN 21 THEN 'Money Synthetic Film'
-                WHEN 22 THEN 'Kung Fu Panda Legacy'
-                ELSE 'Synthetic Title ' || g
-            END,
-            CASE WHEN g % 9 = 0 THEN 'T' || g ELSE NULL END,
-            CASE WHEN g IN (17, 18) THEN 2 WHEN g % 23 = 0 THEN 3 ELSE 1 END,
-            CASE g
-                WHEN 1 THEN 2016 WHEN 2 THEN 2007 WHEN 3 THEN 2006 WHEN 4 THEN 2009
-                WHEN 5 THEN 2008 WHEN 6 THEN 2007 WHEN 7 THEN 2016 WHEN 8 THEN 2007
-                WHEN 9 THEN 2011 WHEN 10 THEN 2015 WHEN 11 THEN 2012 WHEN 12 THEN 2007
-                WHEN 13 THEN 2008 WHEN 14 THEN 2009 WHEN 15 THEN 2015 WHEN 16 THEN 2004
-                WHEN 17 THEN 2006 WHEN 18 THEN 2007 WHEN 19 THEN 1982 WHEN 20 THEN 2016
-                WHEN 21 THEN 1998 WHEN 22 THEN 2008
-                ELSE 1950 + (g * 17) % 73
-            END,
-            400000 + g,
-            left(md5('title-' || g), 5),
-            NULL::bigint,
-            NULL::integer,
-            CASE WHEN g = 1 THEN 60 ELSE NULL END,
-            NULL,
-            md5('title-' || g)
-        FROM generate_series($1::bigint, $2::bigint) AS g)
 INSERT INTO aka_title
-            (id, movie_id, title, imdb_index, kind_id, production_year, phonetic_code,
-             episode_of_id, season_nr, episode_nr, note, md5sum)
-        SELECT
-            id,
-            id,
-            'Alternative ' || title,
-            imdb_index,
-            kind_id,
-            production_year,
-            phonetic_code,
-            episode_of_id,
-            season_nr,
-            episode_nr,
-            '(internet)',
-            md5('aka-title-' || id)
-        FROM generated_source;
-        """,
+    (id, movie_id, title, imdb_index, kind_id, production_year, phonetic_code,
+     episode_of_id, season_nr, episode_nr, note, md5sum)
+SELECT id, id, 'Alternative ' || title, imdb_index, kind_id, production_year,
+       phonetic_code, episode_of_id, season_nr, episode_nr, '(internet)', md5('aka-title-' || id)
+FROM title WHERE id BETWEEN $1::bigint AND $2::bigint;
+            """,
             count=titles,
+            depends_on=('title',),
         ),
         LoadTask(
             'cast_info',
@@ -432,10 +393,14 @@ INSERT INTO cast_info
         SELECT
             g,
             1 + floor(power(det_uniform(g, 11), 1.5) * {people})::bigint,
-            1 + ((g::bigint * 65537 - 1) % {titles}),
-            1 + floor(det_uniform(g, 12) * {characters})::bigint,
-            (ARRAY['(producer)', '(writer)', '(voice)', '(uncredited)', NULL])
-                [1 + floor(det_uniform(g, 13) * 5)::bigint],
+            1 + ((g::bigint * {cast_stride} - 1) % {titles}),
+            CASE WHEN floor(det_uniform(g, 15) * 6)::bigint < 2
+                 THEN 1 + floor(det_uniform(g, 12) * {characters})::bigint ELSE NULL END,
+            CASE 1 + floor(det_uniform(g, 15) * 6)::bigint
+                WHEN 3 THEN '(writer)' WHEN 4 THEN '(costume designer)'
+                WHEN 5 THEN '(producer)' WHEN 6 THEN '(director)'
+                ELSE (ARRAY['(voice)', '(uncredited)', NULL])
+                     [1 + floor(det_uniform(g, 13) * 3)::bigint] END,
             1 + floor(det_uniform(g, 14) * 20)::bigint,
             1 + floor(det_uniform(g, 15) * 6)::bigint
         FROM generate_series($1::bigint, $2::bigint) AS g;
@@ -447,15 +412,15 @@ INSERT INTO cast_info
             f"""
 WITH anchor_cast(person_id, person_role_id, note, role_id, nr_order) AS (
             VALUES
-                (1, 1, '(producer)', 1, 1),
+                (1, 1, '(actor)', 1, 1),
                 (1, 1, '(voice) (uncredited)', 1, 2),
                 (2, 5, '(voice)', 2, 3),
-                (2, 5, '(writer)', 3, 4),
+                (2, NULL, '(writer)', 3, 4),
                 (3, 3, '(voice: English version)', 2, 5),
-                (4, 4, '(producer)', 5, 6),
-                (4, 4, '(writer)', 3, 7),
+                (4, NULL, '(producer)', 5, 6),
+                (4, NULL, '(writer)', 3, 7),
                 (5, 1, '(uncredited)', 1, 8),
-                (6, 2, '(costume designer)', 4, 9),
+                (6, NULL, '(costume designer)', 4, 9),
                 (7, 1, '(actor)', 1, 10),
                 (8, 1, '(actor)', 1, 11)
         )
@@ -479,7 +444,7 @@ WITH anchor_cast(person_id, person_role_id, note, role_id, nr_order) AS (
 INSERT INTO movie_keyword (id, movie_id, keyword_id)
         SELECT
             g,
-            1 + ((g::bigint * 65537 - 1) % {titles}),
+            1 + ((g::bigint * {cast_stride} - 1) % {titles}),
             1 + floor(power(det_uniform(g, 21), 2.0) * {keywords})::bigint
         FROM generate_series($1::bigint, $2::bigint) AS g;
         """,
@@ -504,7 +469,7 @@ INSERT INTO movie_companies
             (id, movie_id, company_id, company_type_id, note)
         SELECT
             g,
-            1 + ((g::bigint * 32771 - 1) % {titles}),
+            1 + ((g::bigint * {company_stride} - 1) % {titles}),
             1 + floor(power(det_uniform(g, 31), 1.8) * {companies})::bigint,
             1 + floor(det_uniform(g, 32) * 4)::bigint,
             (ARRAY['(co-production) (presents)', '(worldwide) (2007)', '(Blu-ray) (USA)',
@@ -542,22 +507,24 @@ INSERT INTO movie_companies
 INSERT INTO movie_info (id, movie_id, info_type_id, info, note)
         SELECT
             g,
-            1 + ((g::bigint * 8191 - 1) % {titles}),
+            1 + ((g::bigint * {info_stride} - 1) % {titles}),
             (ARRAY[4, 6, 7, 8])[s.slot],
             CASE s.slot
                 WHEN 1 THEN (ARRAY['Horror', 'Thriller', 'Action', 'Sci-Fi'])[s.pick]
                 WHEN 2 THEN '$' || (100000 + (g::bigint * 7919) % 200000000)
                 WHEN 3 THEN (ARRAY['USA', 'Germany', 'Sweden', 'Norway'])[s.pick]
-                ELSE 'USA: 2007'
+                ELSE 'USA: ' || LEAST(2024, t.production_year + g % 3)::text
             END,
             CASE WHEN s.slot = 4 THEN '(internet)' ELSE NULL END
         FROM generate_series($1::bigint, $2::bigint) AS g
+        JOIN title t ON t.id = 1 + ((g::bigint * {info_stride} - 1) % {titles})
         CROSS JOIN LATERAL (
-            SELECT 1 + floor(det_uniform(g, 41) * 4)::bigint AS slot,
+            SELECT 1 + ((g - 1) / {titles})::bigint AS slot,
                    1 + floor(det_uniform(g, 42) * 4)::bigint AS pick
         ) AS s;
         """,
             count=info_rows,
+            depends_on=('title',),
         ),
         LoadTask(
             'movie_info_anchors',
@@ -573,17 +540,11 @@ WITH anchor_info(info_type_id, info, note) AS (
                 (4, 'Drama', NULL),
                 (4, 'Family', NULL),
                 (4, 'Western', NULL),
-                (6, '$1000000', NULL),
                 (7, 'Sweden', NULL),
                 (7, 'Norway', NULL),
                 (7, 'Germany', NULL),
                 (7, 'Denmark', NULL),
-                (7, 'Swedish', NULL),
-                (7, 'Denish', NULL),
-                (7, 'Norwegian', NULL),
-                (7, 'German', NULL),
                 (7, 'USA', NULL),
-                (7, 'American', NULL),
                 (7, 'Bulgaria', NULL),
                 (8, 'USA: 1994', '(internet)'),
                 (8, 'USA: 2007', '(internet)'),
@@ -611,44 +572,37 @@ WITH anchor_info(info_type_id, info, note) AS (
             'movie_info_idx',
             f"""
 INSERT INTO movie_info_idx (id, movie_id, info_type_id, info, note)
-        SELECT
-            g,
-            1 + ((g::bigint * 8191 - 1) % {titles}),
-            (ARRAY[1, 3, 5])[s.slot],
-            CASE s.slot
-                WHEN 1 THEN (1 + g % 250)::text
-                WHEN 2 THEN to_char(2.0 + det_uniform(g, 1) * 8.0, 'FM99.0')
-                ELSE (1000 + (g::bigint * 15485863) % 500000)::text
-            END,
-            NULL
-        FROM generate_series($1::bigint, $2::bigint) AS g
-        CROSS JOIN LATERAL (SELECT 1 + floor(det_uniform(g, 51) * 3)::bigint AS slot) AS s;
-        """,
+SELECT g, 1 + (g - 1) % {titles},
+       CASE WHEN g <= {titles} THEN 3 ELSE 5 END,
+       CASE WHEN g <= {titles}
+            THEN to_char(2.0 + det_uniform(1 + (g - 1) % {titles}, 1) * 8.0, 'FM99.0')
+            ELSE (1000 + ((1 + (g - 1) % {titles}) * 15485863) % 500000)::text END,
+       NULL
+FROM generate_series($1::bigint, $2::bigint) AS g;
+            """,
             count=info_index_rows,
         ),
         LoadTask(
-            'movie_info_idx_anchors',
+            'movie_info_idx_ranks',
             f"""
-WITH anchor_info_idx(info_type_id, info) AS (
-            VALUES
-                (1, '1'),
-                (2, '1'),
-                (3, '2.5'),
-                (3, '9.5'),
-                (5, '250000')
-        )
-        INSERT INTO movie_info_idx (id, movie_id, info_type_id, info, note)
-        SELECT
-            ({info_index_rows} + row_number() OVER (
-                ORDER BY movie_id, info_type_id, info
-            ))::bigint,
-            movie_id,
-            info_type_id,
-            info,
-            NULL
-        FROM generate_series(1, 22) AS movie_id
-        CROSS JOIN anchor_info_idx;
-        """,
+WITH ranked AS (
+    SELECT r.movie_id,
+           row_number() OVER (ORDER BY r.info::numeric DESC, v.info::numeric DESC,
+                r.movie_id) AS top_rank,
+           row_number() OVER (ORDER BY r.info::numeric ASC, v.info::numeric ASC,
+                r.movie_id DESC) AS bottom_rank
+    FROM movie_info_idx r JOIN movie_info_idx v USING (movie_id)
+    JOIN title t ON t.id = r.movie_id
+    WHERE r.info_type_id = 3 AND v.info_type_id = 5 AND t.kind_id = 1
+)
+INSERT INTO movie_info_idx (id, movie_id, info_type_id, info, note)
+SELECT {info_index_rows} + top_rank, movie_id, 1, top_rank::text, NULL
+FROM ranked WHERE top_rank <= 250
+UNION ALL
+SELECT {info_index_rows} + 250 + bottom_rank, movie_id, 2, bottom_rank::text, NULL
+FROM ranked WHERE bottom_rank <= 10;
+            """,
+            depends_on=('movie_info_idx', 'title'),
         ),
         LoadTask(
             'person_info',
@@ -689,26 +643,11 @@ WITH anchor_person_info(info_type_id, info, note) AS (
             'complete_cast',
             f"""
 INSERT INTO complete_cast (id, movie_id, subject_id, status_id)
-        SELECT g, 1 + (g - 1) % {titles}, 1 + ((g - 1) / {titles})::bigint, 4
+        SELECT g, 1 + (g - 1) % {titles}, 1 + ((g - 1) / {titles})::bigint,
+               CASE WHEN g % 3 = 0 THEN 3 ELSE 4 END
         FROM generate_series($1::bigint, $2::bigint) AS g;
         """,
             count=titles * 2,
-        ),
-        LoadTask(
-            'complete_cast_anchors',
-            f"""
-WITH anchor_complete_cast(subject_id, status_id) AS (
-            VALUES (1, 3), (2, 3), (1, 4), (2, 4)
-        )
-        INSERT INTO complete_cast (id, movie_id, subject_id, status_id)
-        SELECT
-            ({titles} * 2 + row_number() OVER (ORDER BY movie_id, subject_id, status_id))::bigint,
-            movie_id,
-            subject_id,
-            status_id
-        FROM generate_series(1, 22) AS movie_id
-        CROSS JOIN anchor_complete_cast;
-        """,
         ),
         LoadTask(
             'movie_link',
@@ -717,7 +656,7 @@ INSERT INTO movie_link (id, movie_id, linked_movie_id, link_type_id)
         SELECT
             g,
             1 + (g - 1) % {titles},
-            1 + g % {titles},
+            1 + ((g + floor(det_uniform(g, 61) * ({titles} - 1))::bigint) % {titles}),
             1 + g % 7
         FROM generate_series($1::bigint, $2::bigint) AS g;
         """,
@@ -730,7 +669,7 @@ INSERT INTO movie_link (id, movie_id, linked_movie_id, link_type_id)
         SELECT
             {movie_links} + (movie_id - 1) * 7 + link_type_id,
             movie_id,
-            movie_id,
+            CASE WHEN movie_id = 17 THEN 18 WHEN movie_id = 18 THEN 17 ELSE movie_id + 1 END,
             link_type_id
         FROM generate_series(1, 22) AS movie_id
         CROSS JOIN generate_series(1, 7) AS link_type_id;
@@ -752,6 +691,42 @@ INSERT INTO movie_link (id, movie_id, linked_movie_id, link_type_id)
                    / 2147483648.0
         $$;""",
         after_data_sql="""
+-- Anchors are compatibility fixtures, but must obey the same temporal invariants.
+UPDATE imdb.cast_info ci
+SET role_id = CASE WHEN n.gender='f' THEN 2 ELSE 1 END
+FROM imdb.name n WHERE ci.person_id=n.id AND ci.role_id IN (1,2);
+UPDATE imdb.movie_companies mc
+SET note = regexp_replace(mc.note, '[(][12][0-9]{3}[)][ ]*', '', 'g')
+           || ' (' || t.production_year::text || ')'
+FROM imdb.title t WHERE t.id=mc.movie_id AND mc.note IS NOT NULL;
+UPDATE imdb.movie_info mi
+SET info = regexp_replace(mi.info, '[0-9]{4}', t.production_year::text)
+FROM imdb.title t
+WHERE t.id = mi.movie_id AND mi.info_type_id = 8
+  AND substring(mi.info FROM '[0-9]{4}')::integer < t.production_year;
+-- A relation is a set, not extra copies of a keyword or an identical attribute.
+WITH duplicates AS (
+    SELECT id, row_number() OVER (PARTITION BY movie_id, keyword_id ORDER BY id) AS rn
+    FROM imdb.movie_keyword
+)
+DELETE FROM imdb.movie_keyword t USING duplicates d WHERE t.id=d.id AND d.rn>1;
+WITH duplicates AS (
+    SELECT id, row_number() OVER (PARTITION BY movie_id, info_type_id, info ORDER BY id) AS rn
+    FROM imdb.movie_info
+)
+DELETE FROM imdb.movie_info t USING duplicates d WHERE t.id=d.id AND d.rn>1;
+-- A sequel/follower/feature/reference points to an earlier title; inverse links point forward.
+UPDATE imdb.movie_link ml SET movie_id=ml.linked_movie_id, linked_movie_id=ml.movie_id
+FROM imdb.title a, imdb.title b
+WHERE a.id=ml.movie_id AND b.id=ml.linked_movie_id
+  AND ((ml.link_type_id IN (1,2,4,6) AND (a.production_year,a.id)<(b.production_year,b.id))
+    OR (ml.link_type_id IN (3,5,7) AND (a.production_year,a.id)>(b.production_year,b.id)));
+WITH duplicates AS (
+    SELECT id, row_number() OVER (PARTITION BY movie_id, linked_movie_id, link_type_id
+                                  ORDER BY id) AS rn
+    FROM imdb.movie_link
+)
+DELETE FROM imdb.movie_link t USING duplicates d WHERE t.id=d.id AND d.rn>1;
 DROP FUNCTION imdb.det_uniform(bigint, integer);""",
         finalize_sql=(root / 'sql/initialization-finalize.sql').read_text(),
     )

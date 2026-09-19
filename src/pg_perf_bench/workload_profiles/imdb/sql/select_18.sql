@@ -1,8 +1,8 @@
 set search_path = 'imdb';
 
 BEGIN;
-SELECT MIN(mi.info) AS movie_budget,
-       MIN(mi_idx.info) AS movie_votes,
+SELECT MIN(CASE WHEN mi.info_type_id = 6 THEN substr(mi.info, 2)::numeric END) AS movie_budget,
+       MIN(mi_idx.info::numeric) AS movie_votes,
        MIN(t.title) AS movie_title
 FROM cast_info AS ci,
      info_type AS it1,
@@ -30,8 +30,8 @@ WHERE ci.note IN ('(producer)',
 COMMIT;
 
 BEGIN;
-SELECT MIN(mi.info) AS movie_budget,
-       MIN(mi_idx.info) AS movie_votes,
+SELECT MIN(mi.info) AS movie_genre,
+       MIN(mi_idx.info::numeric) AS movie_rating,
        MIN(t.title) AS movie_title
 FROM cast_info AS ci,
      info_type AS it1,
@@ -50,7 +50,7 @@ WHERE ci.note IN ('(writer)',
   AND mi.info IN ('Horror',
                   'Thriller')
   AND mi.note IS NULL
-  AND mi_idx.info > '8.0'
+  AND mi_idx.info::numeric > '8.0'
   AND n.gender IS NOT NULL
   AND n.gender = 'f'
   AND t.production_year BETWEEN 2008 AND 2014
@@ -67,8 +67,8 @@ WHERE ci.note IN ('(writer)',
 COMMIT;
 
 BEGIN;
-SELECT MIN(mi.info) AS movie_budget,
-       MIN(mi_idx.info) AS movie_votes,
+SELECT MIN(mi.info) AS movie_genre,
+       MIN(mi_idx.info::numeric) AS movie_votes,
        MIN(t.title) AS movie_title
 FROM cast_info AS ci,
      info_type AS it1,

@@ -123,8 +123,8 @@ BEGIN
 
     SELECT COALESCE(SUM(
         CASE
-            WHEN EXTRACT(EPOCH FROM (rental.return_date - rental.rental_date))/86400 > film.rental_duration
-            THEN EXTRACT(EPOCH FROM (rental.return_date - rental.rental_date))/86400 - film.rental_duration
+            WHEN EXTRACT(EPOCH FROM (LEAST(COALESCE(rental.return_date, p_effective_date), p_effective_date) - rental.rental_date))/86400 > film.rental_duration
+            THEN EXTRACT(EPOCH FROM (LEAST(COALESCE(rental.return_date, p_effective_date), p_effective_date) - rental.rental_date))/86400 - film.rental_duration
             ELSE 0
         END
     )::integer,0) INTO v_overfees
@@ -158,7 +158,8 @@ BEGIN
   SELECT customer_id INTO v_customer_id
   FROM rental
   WHERE return_date IS NULL
-  AND inventory_id = p_inventory_id;
+  AND inventory_id = p_inventory_id
+  ORDER BY rental_date DESC, rental_id DESC LIMIT 1;
 
   RETURN v_customer_id;
 END $$;
@@ -169,34 +170,12 @@ END $$;
 --
 
 CREATE FUNCTION pagila.inventory_in_stock(p_inventory_id bigint) RETURNS boolean
-    LANGUAGE plpgsql
+    LANGUAGE sql STABLE
     AS $$
-DECLARE
-    v_rentals INTEGER;
-    v_out     INTEGER;
-BEGIN
-    -- AN ITEM IS IN-STOCK IF THERE ARE EITHER NO ROWS IN THE rental TABLE
-    -- FOR THE ITEM OR ALL ROWS HAVE return_date POPULATED
-
-    SELECT count(*) INTO v_rentals
-    FROM rental
-    WHERE inventory_id = p_inventory_id;
-
-    IF v_rentals = 0 THEN
-      RETURN TRUE;
-    END IF;
-
-    SELECT COUNT(rental_id) INTO v_out
-    FROM inventory LEFT JOIN rental USING(inventory_id)
-    WHERE inventory.inventory_id = p_inventory_id
-    AND rental.return_date IS NULL;
-
-    IF v_out > 0 THEN
-      RETURN FALSE;
-    ELSE
-      RETURN TRUE;
-    END IF;
-END $$;
+    SELECT EXISTS (SELECT 1 FROM pagila.inventory WHERE inventory_id = $1)
+       AND NOT EXISTS (SELECT 1 FROM pagila.rental
+                       WHERE inventory_id = $1 AND return_date IS NULL);
+$$;
 
 
 --
