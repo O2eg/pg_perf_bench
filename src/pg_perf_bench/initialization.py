@@ -418,37 +418,155 @@ async def prepare_database(
 
 
 def build_initialization_section(benchmark_runs, options):
+    """Separate measured loading counters from DDL and maintenance timings."""
+    labels = {
+        'schema': 'Create schema',
+        'unlogged': 'Set tables UNLOGGED',
+        'prepare': 'Prepare generator',
+        'data': 'Load data',
+        'after_data': 'Post-load processing',
+        'logged': 'Set tables LOGGED',
+        'indexes': 'Build indexes',
+        'constraints': 'Apply constraints',
+        'finalize': 'Finalize dataset',
+        'vacuum': 'Vacuum and freeze',
+        'analyze': 'Analyze relations',
+        'restore_settings_and_sync': 'Restore durability settings',
+    }
     reports = {}
     for run in benchmark_runs:
         evidence = run.get('initialization')
         if evidence is None:
             continue
         index = run['iteration']['index']
-        rows = []
+        groups = {}
+        loads = []
+        operations = []
         for phase in evidence['phases']:
-            tasks = phase.get('tasks', [])
-            rows.append(
-                [
-                    phase['name'],
-                    round(phase['elapsed_seconds'], 3),
-                    sum(task['rows'] for task in tasks),
-                    sum(task['batches'] for task in tasks),
-                ]
-            )
+            kind = phase['name'].split(':', 1)[0]
+            group = groups.setdefault(kind, {'seconds': 0.0, 'phases': [], 'tasks': []})
+            group['seconds'] += phase['elapsed_seconds']
+            group['phases'].append(phase)
+            group['tasks'].extend(phase.get('tasks', []))
+            if kind == 'data':
+                for task in phase.get('tasks', []):
+                    loads.append(
+                        [
+                            task['name'],
+                            round(task['worker_seconds'], 3),
+                            f'Rows inserted: {task["rows"]:,}; batches: {task["batches"]:,}',
+                        ]
+                    )
+            elif kind in ('indexes', 'constraints'):
+                # Aggregate timings already appear in the summary. Listing them
+                # again beside individual tasks invites double-counting.
+                action = 'Build index' if kind == 'indexes' else 'Apply constraint'
+                for task in phase.get('tasks', []):
+                    operations.append(
+                        [
+                            action,
+                            round(task['worker_seconds'], 3),
+                            f'{task["name"]}; completed executions: {task["batches"]:,}. '
+                            'Time includes execution and commit.',
+                        ]
+                    )
+            else:
+                relation = phase['name'].partition(':')[2]
+                description = {
+                    'schema': 'Create profile schemas and supporting objects: '
+                    + ', '.join(evidence.get('schemas', [])),
+                    'unlogged': f'Set {relation} to UNLOGGED before bulk loading.',
+                    'logged': (
+                        f'Set {relation} to LOGGED before bulk loading.'
+                        if options['table_mode'] == 'logged'
+                        else f'Restore WAL logging for {relation} after loading.'
+                    ),
+                    'vacuum': f'VACUUM (FREEZE, ANALYZE) {relation}: freeze rows and '
+                    'refresh visibility and planner statistics.',
+                    'prepare': 'Execute profile setup SQL for data generation.',
+                    'after_data': 'Execute profile post-load SQL, including declared '
+                    'data corrections; affected rows are not recorded.',
+                    'finalize': 'Execute profile finalization SQL, such as materialized '
+                    'view refresh and workload bounds setup.',
+                    'analyze': 'ANALYZE profile relations, including partitioned parents.',
+                    'restore_settings_and_sync': 'Restore pre-load durability settings; '
+                    'checkpoint and sync only if fsync changed.',
+                }.get(kind, f'Execute custom initialization step {phase["name"]}.')
+                operations.append(
+                    [
+                        labels.get(kind, kind),
+                        round(phase['elapsed_seconds'], 3),
+                        description,
+                    ]
+                )
+
+        summary = []
+        for kind, group in groups.items():
+            tasks = group['tasks']
+            if kind == 'data':
+                inserted = sum(task['rows'] for task in tasks)
+                batches = sum(task['batches'] for task in tasks)
+                work = f'{inserted:,} rows inserted; {len(tasks):,} load tasks; {batches:,} batches'
+            elif kind in ('indexes', 'constraints'):
+                work = f'Tasks: {len(tasks):,}; executions: {sum(t["batches"] for t in tasks):,}'
+            elif kind in ('unlogged', 'logged', 'vacuum'):
+                work = f'{len(group["phases"]):,} relations'
+            else:
+                work = {
+                    'schema': 'Create tables and supporting objects',
+                    'prepare': 'Install generator helpers',
+                    'after_data': 'Apply profile post-processing; row counts not collected',
+                    'finalize': 'Run profile finalization SQL',
+                    'analyze': 'Refresh planner statistics',
+                    'restore_settings_and_sync': 'Restore settings; sync storage if fsync changed',
+                }.get(kind, 'Execute profile SQL; row counts not collected')
+            summary.append([labels.get(kind, kind), round(group['seconds'], 3), work])
         barrier = evidence['replication_barrier']
-        rows.append(['replica_replay_barrier', round(barrier['elapsed_seconds'], 3), None, None])
+        summary.append(
+            [
+                'Wait for replica replay',
+                round(barrier['elapsed_seconds'], 3),
+                f'{barrier["replicas"]} replicas caught up to {barrier["target_lsn"]}',
+            ]
+        )
         reports[f'iteration_{index}'] = {
-            'header': f'Iteration {index}: initialization phases',
-            'description': f'Workers: {options["workers"]}; batch rows: {options["batch_rows"]}; '
-            f'tables during load: {options["table_mode"]}; fsync during load: {options["fsync"]}; '
-            f'loader synchronous_commit: {options["synchronous_commit"]}. '
-            f'Final fsync: {evidence["fsync_after"]}; replicas caught up: {barrier["replicas"]}; '
-            f'replay target: {barrier["target_lsn"]}. '
-            'Rows and batches describe data jobs; elapsed times are wall-clock seconds.',
+            'header': f'Iteration {index}: initialization summary',
+            'description': f'Up to {options["workers"]} load workers; '
+            f'batch limit: {options["batch_rows"]:,} rows. '
+            f'Tables during load: {options["table_mode"]}; fsync policy: {options["fsync"]}; '
+            f'synchronous_commit policy: {options["synchronous_commit"]}; '
+            f'fsync after initialization: {evidence["fsync_after"]}. '
+            'Times are measured elapsed seconds per stage; per-relation operations are grouped. '
+            'Parallel worker times are not added to stage elapsed time.',
             'item_type': 'table',
             'state': 'expanded',
             'collection_status': 'ok',
-            'theader': ['phase', 'elapsed_seconds', 'rows', 'jobs'],
-            'data': rows,
+            'theader': ['Stage', 'Elapsed (s)', 'Work performed'],
+            'data': summary,
+        }
+        reports[f'iteration_{index}_loading'] = {
+            'header': f'Iteration {index}: data loading by task',
+            'description': 'Inserted rows come from PostgreSQL INSERT/COPY completion counts. '
+            'They are not final table sizes: post-load processing may update or delete rows. '
+            'Batches count successful loader executions, including single-statement tasks. '
+            'Worker time is cumulative execution time including commit, not wall-clock time. '
+            'Task names identify loader jobs, not necessarily physical tables; inserting into '
+            'a partitioned parent routes rows to its partitions without separate loader jobs.',
+            'item_type': 'table',
+            'state': 'collapsed',
+            'collection_status': 'ok',
+            'theader': ['Load task', 'Worker time (s)', 'Details'],
+            'data': loads,
+        }
+        reports[f'iteration_{index}_operations'] = {
+            'header': f'Iteration {index}: SQL and maintenance details',
+            'description': 'Individual operations, without the stage totals already shown above. '
+            'Each row describes the work actually timed. Index tasks can run in parallel, '
+            'so adding these times does not give total initialization elapsed time.',
+            'item_type': 'table',
+            'state': 'collapsed',
+            'collection_status': 'ok',
+            'theader': ['Operation', 'Time (s)', 'Description'],
+            'data': operations,
         }
     return {'header': 'Database initialization', 'state': 'expanded', 'reports': reports}

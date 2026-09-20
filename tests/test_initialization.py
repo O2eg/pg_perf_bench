@@ -301,3 +301,95 @@ def test_recovery_rejects_sql_failover_when_host_transport_still_targets_old_pri
     )
     with pytest.raises(ConfigurationError, match='target different servers'):
         asyncio.run(guard._identity())
+
+
+def test_initialization_report_separates_row_counts_from_maintenance_times():
+    from pg_perf_bench.initialization import build_initialization_section
+
+    phases = [
+        {'name': 'schema', 'elapsed_seconds': 0.1},
+        {'name': 'unlogged:first', 'elapsed_seconds': 1},
+        {'name': 'unlogged:second', 'elapsed_seconds': 2},
+        {
+            'name': 'data',
+            'elapsed_seconds': 5,
+            'tasks': [
+                {'name': 'first', 'rows': 7, 'batches': 2, 'worker_seconds': 4},
+                {'name': 'payment', 'rows': 3, 'batches': 1, 'worker_seconds': 9},
+            ],
+        },
+        {'name': 'after_data', 'elapsed_seconds': 0.5},
+        {
+            'name': 'indexes',
+            'elapsed_seconds': 2,
+            'tasks': [{'name': 'first_pk', 'rows': 0, 'batches': 1, 'worker_seconds': 2}],
+        },
+    ]
+    runs = [
+        {
+            'iteration': {'index': 1},
+            'initialization': {
+                'phases': phases,
+                'fsync_after': 'on',
+                'replication_barrier': {'elapsed_seconds': 0.2, 'replicas': 2, 'target_lsn': '0/A'},
+            },
+        }
+    ]
+    options = dict(
+        workers=4, batch_rows=100000, table_mode='unlogged', fsync='keep', synchronous_commit='keep'
+    )
+    reports = build_initialization_section(runs, options)['reports']
+    summary = reports['iteration_1']
+    assert summary['theader'] == ['Stage', 'Elapsed (s)', 'Work performed']
+    assert ['Set tables UNLOGGED', 3, '2 relations'] in summary['data']
+    assert ['Load data', 5, '10 rows inserted; 2 load tasks; 3 batches'] in summary['data']
+    assert ['Build indexes', 2, 'Tasks: 1; executions: 1'] in summary['data']
+    loading = reports['iteration_1_loading']
+    assert loading['data'] == [
+        ['first', 4, 'Rows inserted: 7; batches: 2'],
+        ['payment', 9, 'Rows inserted: 3; batches: 1'],
+    ]
+    assert loading['theader'] == ['Load task', 'Worker time (s)', 'Details']
+    assert 'not final table sizes' in loading['description']
+    assert 'partitioned parent' in loading['description']
+    operations = reports['iteration_1_operations']
+    assert operations['theader'] == ['Operation', 'Time (s)', 'Description']
+    assert len(operations['data']) == 5  # No duplicate aggregate index timing.
+    assert any(row[0] == 'Build index' and 'first_pk' in row[2] for row in operations['data'])
+    assert not any(row[0] == 'Build indexes' for row in operations['data'])
+    assert any('first to UNLOGGED' in row[2] for row in operations['data'])
+    assert any('second to UNLOGGED' in row[2] for row in operations['data'])
+    assert not any('Timed operation;' in row[2] for row in operations['data'])
+    assert reports['iteration_1_operations']['state'] == 'collapsed'
+    assert all(len(row) == 3 for row in reports['iteration_1_operations']['data'])
+    assert build_initialization_section([{'iteration': {'index': 2}}], options)['reports'] == {}
+
+
+@pytest.mark.parametrize(
+    ('table_mode', 'description'),
+    [
+        ('logged', 'Set payment to LOGGED before bulk loading.'),
+        ('unlogged', 'Restore WAL logging for payment after loading.'),
+    ],
+)
+def test_initialization_report_logged_description_matches_load_mode(table_mode, description):
+    from pg_perf_bench.initialization import build_initialization_section
+
+    conversion = {'name': 'logged:payment', 'elapsed_seconds': 0.5}
+    data = {'name': 'data', 'elapsed_seconds': 1, 'tasks': []}
+    phases = [conversion, data] if table_mode == 'logged' else [data, conversion]
+    run = {
+        'iteration': {'index': 1},
+        'initialization': {
+            'phases': phases,
+            'fsync_after': 'on',
+            'replication_barrier': {'elapsed_seconds': 0, 'replicas': 0, 'target_lsn': '0/A'},
+        },
+    }
+    options = dict(
+        workers=4, batch_rows=100000, table_mode=table_mode, fsync='keep', synchronous_commit='keep'
+    )
+
+    reports = build_initialization_section([run], options)['reports']
+
+    assert reports['iteration_1_operations']['data'] == [['Set tables LOGGED', 0.5, description]]

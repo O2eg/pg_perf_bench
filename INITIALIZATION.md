@@ -22,6 +22,15 @@ flight, regardless of dataset size. A batch commits independently; the loader
 does not create one transaction for the entire dataset. Progress logs report
 committed rows and batches per task.
 
+The report shows a compact stage summary, with table conversions and vacuum
+operations grouped together. Expand **data loading by task** for PostgreSQL
+INSERT/COPY row counts, completed batches and cumulative worker time. Inserted
+rows are measured before post-load updates or deduplication; they are not final
+table cardinalities. Worker times overlap during parallel loading and must not
+be added to elapsed stage times. DDL and maintenance details are collapsed and
+do not display artificial zero row counters. A task targeting a partitioned
+parent can populate several partitions without separate partition-level jobs.
+
 Before each iteration, `--reset-mode database` (default) recreates the disposable
 database. `--reset-mode schema` resets the schemas in `LoadPlan.schemas` inside
 a pre-created dedicated database; it requires fast initialization and `--init-fsync keep`.
