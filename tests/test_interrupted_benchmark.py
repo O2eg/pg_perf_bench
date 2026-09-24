@@ -11,7 +11,7 @@ from pg_diag.sampler_runtime import SamplerCollection
 from pg_perf_bench.benchmark import BenchmarkRunner
 from pg_perf_bench.cli import main
 from pg_perf_bench.const import BENCHMARK_TEMPLATE_JSON_PATH
-from pg_perf_bench.errors import CommandExecutionError, CommandTimeoutError
+from pg_perf_bench.errors import CommandExecutionError, CommandTimeoutError, exception_evidence
 from pg_perf_bench.executors import ProcessResult, run_local_process
 from pg_perf_bench.report.processing import get_report_structure
 from pg_perf_bench.system_metrics import collect_system_metrics
@@ -344,8 +344,8 @@ def test_fast_initialization_evidence_survives_workload_failure():
                     command_timeout=1,
                     initialization_plan=MagicMock(),
                 )
-        assert caught.value.benchmark_run['initialization'] == init
-        assert caught.value.benchmark_run['init']['returncode'] == 0
+        assert exception_evidence(caught.value, 'benchmark_run')['initialization'] == init
+        assert exception_evidence(caught.value, 'benchmark_run')['init']['returncode'] == 0
 
     asyncio.run(scenario())
 
@@ -411,7 +411,7 @@ def test_real_local_process_and_os_sampler_preserve_tail_without_database(cancel
                 task.cancel()
                 with pytest.raises(asyncio.CancelledError) as caught:
                     await task
-                result = caught.value.benchmark_run
+                result = exception_evidence(caught.value, 'benchmark_run')
                 assert 'tps = 1.0' in result['workload']['stdout']
                 assert 'metrics' not in result
             else:

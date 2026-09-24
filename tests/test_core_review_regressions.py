@@ -7,7 +7,7 @@ import pytest
 from pg_diag.sampler_runtime import SamplerCollection
 
 from pg_perf_bench.benchmark import BenchmarkRunner
-from pg_perf_bench.errors import CommandExecutionError, CommandFailure
+from pg_perf_bench.errors import CommandExecutionError, CommandFailure, exception_evidence
 from pg_perf_bench.executors import ProcessResult
 from pg_perf_bench.report.benchmark_status import build_execution_section
 from pg_perf_bench.system_metrics import collect_system_metrics
@@ -113,7 +113,7 @@ def test_cancellation_during_final_window_keeps_prior_and_final_samples(cancel_c
                 release_window.set()
                 with pytest.raises(asyncio.CancelledError) as caught:
                     await asyncio.wait_for(task, timeout=2)
-                evidence = caught.value.benchmark_run
+                evidence = exception_evidence(caught.value, 'benchmark_run')
                 assert evidence['status'] == 'cancelled'
                 assert evidence['system_metrics']['samples']['os.memory'] == [sample(1), sample(2)]
                 assert evidence['system_metrics']['samples']['os.disk'] == [sample(1)]

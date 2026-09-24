@@ -46,6 +46,7 @@ from pg_perf_bench.errors import (
     CommandExecutionError,
     CommandFailure,
     ConfigurationError,
+    exception_evidence,
 )
 from pg_perf_bench.executors.process import ProcessResult
 from pg_perf_bench.init_policy import (
@@ -547,8 +548,9 @@ class BenchmarkRunner:
         except BaseException as exc:
             result['status'] = 'cancelled' if isinstance(exc, asyncio.CancelledError) else 'failed'
             result['error'] = str(exc) or type(exc).__name__
-            if hasattr(exc, 'failure') and 'workload' not in result:
-                result['workload'] = exc.failure.as_dict()
+            failure = exception_evidence(exc, 'failure')
+            if failure is not None and 'workload' not in result:
+                result['workload'] = failure.as_dict()
             # Failed stdout can contain apparently valid TPS. Keep it only as raw
             # evidence, never as a point in the successful benchmark series.
             exc.benchmark_run = redact_mapping(result, secrets=secrets)
@@ -704,10 +706,11 @@ class BenchmarkRunner:
         }
         if error is not None:
             payload['error'] = str(error) or type(error).__name__
-            payload['failed_iteration'] = getattr(error, 'benchmark_run', None)
-            if hasattr(error, 'failure'):
-                payload['failed_command'] = error.failure.as_dict()
-                payload['statement_timeout_messages'] = error.failure.stderr.count(
+            payload['failed_iteration'] = exception_evidence(error, 'benchmark_run')
+            failure = exception_evidence(error, 'failure')
+            if failure is not None:
+                payload['failed_command'] = failure.as_dict()
+                payload['statement_timeout_messages'] = failure.stderr.count(
                     'canceling statement due to statement timeout'
                 )
         payload = redact_mapping(payload, secrets=(db_conf.get('password'),))
@@ -901,9 +904,10 @@ class BenchmarkRunner:
                     result['existing_dataset_validation'] = validation
             except BaseException as exc:
                 primary_error = exc
-                evidence = getattr(exc, 'benchmark_run', {})
-                if hasattr(exc, 'failure') and 'workload' not in evidence:
-                    evidence['failed_command'] = exc.failure.as_dict()
+                evidence = exception_evidence(exc, 'benchmark_run', {})
+                failure = exception_evidence(exc, 'failure')
+                if failure is not None and 'workload' not in evidence:
+                    evidence['failed_command'] = failure.as_dict()
                 evidence.update(
                     iteration=iteration,
                     init_policy=init_policy,
@@ -1023,8 +1027,8 @@ class BenchmarkRunner:
         """Render existing evidence without reconnecting to a failed database."""
         safe = redact_mapping(
             {
-                'runs': getattr(error, 'completed_runs', []),
-                'failed': getattr(error, 'benchmark_run', None),
+                'runs': exception_evidence(error, 'completed_runs', []),
+                'failed': exception_evidence(error, 'benchmark_run'),
                 'message': str(error) or type(error).__name__,
             },
             secrets=secrets,

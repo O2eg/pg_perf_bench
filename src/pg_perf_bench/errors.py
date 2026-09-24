@@ -2,8 +2,32 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
+
+
+def exception_evidence(error: BaseException, name: str, default: Any = None) -> Any:
+    """Read attached evidence through Task cancellation wrappers on Python 3.10.
+
+    Older asyncio Tasks create a new CancelledError and keep the original in
+    __context__. Do not follow unrelated exception contexts: they may describe
+    a different operation. The closest explicit value, including None, wins.
+    """
+    pending = [error]
+    seen = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if hasattr(current, name):
+            return getattr(current, name)
+        if isinstance(current, asyncio.CancelledError):
+            for nested in (current.__context__, current.__cause__):
+                if isinstance(nested, asyncio.CancelledError):
+                    pending.append(nested)
+    return default
 
 
 class PgPerfBenchError(Exception):
