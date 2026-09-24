@@ -82,3 +82,50 @@ def test_diagnostic_cleanup_resets_only_its_settings_and_always_closes(error):
     assert 'RESET lock_timeout' in sql
     assert 'synchronous_commit' not in sql
     db.close.assert_awaited_once()
+
+
+def test_workload_timeout_preserves_other_pgoptions(monkeypatch):
+    from pg_perf_bench.session_settings import workload_environment
+
+    monkeypatch.setenv('PGOPTIONS', '-c work_mem=64MB')
+    env = workload_environment({}, statement_timeout_seconds=0.0001)
+    assert env['PGOPTIONS'] == '-c work_mem=64MB -c statement_timeout=1'
+
+
+@pytest.mark.parametrize('timeout', [0, -1, float('nan'), float('inf'), 2147483.648])
+def test_workload_timeout_rejects_invalid_values(timeout):
+    from pg_perf_bench.errors import ConfigurationError
+    from pg_perf_bench.session_settings import workload_environment
+
+    with pytest.raises(ConfigurationError):
+        workload_environment({}, statement_timeout_seconds=timeout)
+
+
+def test_sql_timeout_probe_does_not_require_startup_timeout(monkeypatch):
+    from types import SimpleNamespace
+
+    from pg_perf_bench.session_settings import check_workload_session
+
+    monkeypatch.delenv('PGOPTIONS', raising=False)
+    calls = []
+
+    async def process(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(stdout='["imdb", "public"]' if len(calls) == 1 else '50')
+
+    with patch('pg_perf_bench.session_settings.run_local_process', process):
+        asyncio.run(
+            check_workload_session(
+                {},
+                SimpleNamespace(schemas=['imdb']),
+                psql_path='psql',
+                pgbench_path='pgbench',
+                timeout=10,
+                pgbench_protocol='simple',
+                statement_timeout_seconds=0.05,
+                sql_statement_timeout=True,
+            )
+        )
+    assert len(calls) == 2
+    assert all('statement_timeout' not in kwargs['env'].get('PGOPTIONS', '') for _, kwargs in calls)
+    assert 'SET statement_timeout=50;' in calls[1][0][calls[1][0].index('-c') + 1]

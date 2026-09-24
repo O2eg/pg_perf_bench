@@ -53,6 +53,7 @@ BEGIN
 END
 $$;
 
+-- search_path is supplied by the common loader and pgbench connection settings.
 REFRESH MATERIALIZED VIEW pagila.rental_by_category;
 
 -- One-row bounds table: the pgbench scripts read it with \gset and pick identifiers with
@@ -72,14 +73,22 @@ SELECT
     (SELECT max(category_id) FROM pagila.category) AS max_category,
     (SELECT max(language_id) FROM pagila.language) AS max_language,
     bounds.data_start_epoch, bounds.data_days,
-    LEAST(30, bounds.data_days) AS report_window_days
+    LEAST(30, bounds.data_days) AS report_window_days,
+    bounds.data_start_epoch + bounds.data_days::bigint * 86400 AS clock_epoch,
+    clock_timestamp() AS clock_started_at
 FROM (
     SELECT extract(epoch FROM TIMESTAMPTZ '2022-01-01 00:00:00+00')::bigint AS data_start_epoch,
-           GREATEST(1, floor(extract(epoch FROM (max(rental_date)
+           GREATEST(1, floor(extract(epoch FROM (GREATEST(
+               (SELECT max(rental_date) FROM pagila.rental),
+               (SELECT max(return_date) FROM pagila.rental),
+               (SELECT max(payment_date) FROM pagila.payment))
                - TIMESTAMPTZ '2022-01-01 00:00:00+00')) / 86400)::integer + 1) AS data_days
-    FROM pagila.rental
 ) AS bounds;
 
+CREATE FUNCTION pagila.benchmark_now() RETURNS timestamptz LANGUAGE sql VOLATILE AS $$
+    SELECT to_timestamp(clock_epoch) + GREATEST(INTERVAL '0 seconds',
+           clock_timestamp() - clock_started_at) FROM pagila.bench_bounds
+$$;
 
 -- Freeze and analyze so the first measured transactions do not pay for hint-bit writes or
 -- stale statistics left by the bulk load.
@@ -106,3 +115,10 @@ VACUUM (FREEZE, ANALYZE) pagila.payment_p2022_05;
 VACUUM (FREEZE, ANALYZE) pagila.payment_p2022_06;
 VACUUM (FREEZE, ANALYZE) pagila.payment_p2022_07;
 ANALYZE pagila.payment;
+
+CREATE INDEX rental_unpaid_fee_customer_idx ON pagila.rental (customer_id, return_date DESC, rental_id) WHERE NOT late_fee_paid AND return_date IS NOT NULL;
+CREATE INDEX payment_future_staff_date_idx ON pagila.payment_future (staff_id, payment_date, rental_id);
+CREATE INDEX payment_future_customer_date_idx ON pagila.payment_future (customer_id, payment_date DESC, payment_id DESC);
+VACUUM (FREEZE, ANALYZE) pagila.payment_future;
+
+CREATE INDEX payment_future_rental_id_idx ON pagila.payment_future (rental_id);

@@ -175,14 +175,19 @@ INSERT INTO name
                 WHEN 6 THEN 'Alice Synthetic Designer'
                 WHEN 7 THEN 'Zoe Synthetic Actor'
                 WHEN 8 THEN 'Xavier Synthetic Actor'
-                ELSE 'Synthetic Person ' || g || ' Family ' || (g % 5000)
+                ELSE (ARRAY['Downey', 'Smith', 'Garcia', 'Brown', 'Wilson', 'Martin',
+                            'Anderson', 'Taylor', 'Lee', 'Miller', 'Clark', 'Walker'])
+                     [1 + floor(det_uniform(g, 101) * 12)::integer]
+                     || ', ' || (ARRAY['Robert', 'Tim', 'Angela', 'Yoko', 'Bert', 'Alice',
+                                      'Zoe', 'Xavier', 'Anna', 'David', 'Maria', 'James'])
+                     [1 + floor(det_uniform(g, 102) * 12)::integer] || ' ' || g
             END,
             CASE WHEN g % 7 = 0 THEN 'I' || g ELSE NULL END,
             200000 + g,
             CASE
                 WHEN g IN (2, 3, 6) THEN 'f'
                 WHEN g IN (1, 4, 5, 7, 8) THEN 'm'
-                WHEN g % 2 = 0 THEN 'f'
+                WHEN floor(det_uniform(g, 102) * 12)::integer IN (2,3,5,6,8,10) THEN 'f'
                 ELSE 'm'
             END,
             CASE g WHEN 1 THEN 'D0001' WHEN 2 THEN 'A0002' WHEN 5 THEN 'B0005'
@@ -209,14 +214,19 @@ WITH generated_source (id, name, imdb_index, imdb_id, gender, name_pcode_cf, nam
                 WHEN 6 THEN 'Alice Synthetic Designer'
                 WHEN 7 THEN 'Zoe Synthetic Actor'
                 WHEN 8 THEN 'Xavier Synthetic Actor'
-                ELSE 'Synthetic Person ' || g || ' Family ' || (g % 5000)
+                ELSE (ARRAY['Downey', 'Smith', 'Garcia', 'Brown', 'Wilson', 'Martin',
+                            'Anderson', 'Taylor', 'Lee', 'Miller', 'Clark', 'Walker'])
+                     [1 + floor(det_uniform(g, 101) * 12)::integer]
+                     || ', ' || (ARRAY['Robert', 'Tim', 'Angela', 'Yoko', 'Bert', 'Alice',
+                                      'Zoe', 'Xavier', 'Anna', 'David', 'Maria', 'James'])
+                     [1 + floor(det_uniform(g, 102) * 12)::integer] || ' ' || g
             END,
             CASE WHEN g % 7 = 0 THEN 'I' || g ELSE NULL END,
             200000 + g,
             CASE
                 WHEN g IN (2, 3, 6) THEN 'f'
                 WHEN g IN (1, 4, 5, 7, 8) THEN 'm'
-                WHEN g % 2 = 0 THEN 'f'
+                WHEN floor(det_uniform(g, 102) * 12)::integer IN (2,3,5,6,8,10) THEN 'f'
                 ELSE 'm'
             END,
             CASE g WHEN 1 THEN 'D0001' WHEN 2 THEN 'A0002' WHEN 5 THEN 'B0005'
@@ -342,7 +352,9 @@ INSERT INTO title
                 WHEN 20 THEN 'Synthetic VHS Movie'
                 WHEN 21 THEN 'Money Synthetic Film'
                 WHEN 22 THEN 'Kung Fu Panda Legacy'
-                ELSE 'Synthetic Title ' || g
+                ELSE CASE WHEN g % 100 = 7 THEN 'Murder Story '
+                          WHEN g % 100 = 21 THEN 'Money Story '
+                          ELSE 'Synthetic Title ' END || g
             END,
             CASE WHEN g % 9 = 0 THEN 'T' || g ELSE NULL END,
             CASE WHEN g IN (17, 18) THEN 2 WHEN g <= 22 THEN 1
@@ -354,7 +366,7 @@ INSERT INTO title
                 WHEN 5 THEN 2008 WHEN 6 THEN 2007 WHEN 7 THEN 2016 WHEN 8 THEN 2007
                 WHEN 9 THEN 2011 WHEN 10 THEN 2015 WHEN 11 THEN 2012 WHEN 12 THEN 2007
                 WHEN 13 THEN 2008 WHEN 14 THEN 2009 WHEN 15 THEN 2015 WHEN 16 THEN 2004
-                WHEN 17 THEN 2006 WHEN 18 THEN 2007 WHEN 19 THEN 1982 WHEN 20 THEN 2016
+                WHEN 17 THEN 2006 WHEN 18 THEN 2007 WHEN 19 THEN 1982 WHEN 20 THEN 1994
                 WHEN 21 THEN 1998 WHEN 22 THEN 2008
                 ELSE CASE WHEN g % 20 IN (4, 5)
                     THEN LEAST(2022, 1950 + (((g / 20) * 20 + 3) * 17) % 73 + g % 20 - 4)
@@ -394,16 +406,21 @@ INSERT INTO cast_info
             g,
             1 + floor(power(det_uniform(g, 11), 1.5) * {people})::bigint,
             1 + ((g::bigint * {cast_stride} - 1) % {titles}),
-            CASE WHEN floor(det_uniform(g, 15) * 6)::bigint < 2
+            CASE WHEN credit.role_id IN (1, 2)
                  THEN 1 + floor(det_uniform(g, 12) * {characters})::bigint ELSE NULL END,
-            CASE 1 + floor(det_uniform(g, 15) * 6)::bigint
+            CASE credit.role_id
                 WHEN 3 THEN '(writer)' WHEN 4 THEN '(costume designer)'
                 WHEN 5 THEN '(producer)' WHEN 6 THEN '(director)'
                 ELSE (ARRAY['(voice)', '(uncredited)', NULL])
                      [1 + floor(det_uniform(g, 13) * 3)::bigint] END,
-            1 + floor(det_uniform(g, 14) * 20)::bigint,
-            1 + floor(det_uniform(g, 15) * 6)::bigint
-        FROM generate_series($1::bigint, $2::bigint) AS g;
+            1 + ((g - 1) / {titles})::bigint,
+            credit.role_id
+        FROM generate_series($1::bigint, $2::bigint) AS g
+        CROSS JOIN LATERAL (
+            SELECT CASE WHEN g <= {titles} THEN 1
+                        WHEN g <= 2 * {titles} THEN 3
+                        ELSE 1 + floor(det_uniform(g, 15) * 6)::bigint END AS role_id
+        ) credit;
         """,
             count=cast_rows,
         ),
@@ -445,7 +462,11 @@ INSERT INTO movie_keyword (id, movie_id, keyword_id)
         SELECT
             g,
             1 + ((g::bigint * {cast_stride} - 1) % {titles}),
-            1 + floor(power(det_uniform(g, 21), 2.0) * {keywords})::bigint
+            CASE WHEN g <= {titles} AND (1 + ((g::bigint * {cast_stride} - 1)
+                           % {titles})) % 100 = 7 THEN 13
+                 WHEN g <= {titles} AND (1 + ((g::bigint * {cast_stride} - 1)
+                           % {titles})) % 100 = 21 THEN 2
+                 ELSE 1 + floor(power(det_uniform(g, 21), 2.0) * {keywords})::bigint END
         FROM generate_series($1::bigint, $2::bigint) AS g;
         """,
             count=keyword_rows,
@@ -471,12 +492,36 @@ INSERT INTO movie_companies
             g,
             1 + ((g::bigint * {company_stride} - 1) % {titles}),
             1 + floor(power(det_uniform(g, 31), 1.8) * {companies})::bigint,
-            1 + floor(det_uniform(g, 32) * 4)::bigint,
-            (ARRAY['(co-production) (presents)', '(worldwide) (2007)', '(Blu-ray) (USA)',
-                   '(theatrical) (France)'])[1 + floor(det_uniform(g, 33) * 4)::bigint]
-        FROM generate_series($1::bigint, $2::bigint) AS g;
+            CASE WHEN g <= {titles} THEN 1
+                 ELSE 2 + floor(det_uniform(g, 32) * 3)::bigint END,
+            event.label || ' (' || release.year::text || ')'
+        FROM generate_series($1::bigint, $2::bigint) AS g
+        JOIN title t ON t.id=1 + ((g::bigint * {company_stride} - 1) % {titles})
+        CROSS JOIN LATERAL (
+            SELECT CASE
+                WHEN t.production_year BETWEEN 1990 AND 1994
+                  OR (t.production_year BETWEEN 1980 AND 1999 AND det_uniform(g, 33)<0.25)
+                    THEN '(VHS) (USA)'
+                ELSE (ARRAY['(co-production) (presents)', '(worldwide)', '(Blu-ray) (USA)',
+                            '(theatrical) (France)'])
+                     [1 + floor(det_uniform(g, 33) * 4)::integer]
+            END AS label
+        ) event
+        CROSS JOIN LATERAL (
+            SELECT CASE
+                WHEN event.label='(VHS) (USA)' THEN
+                    CASE WHEN t.production_year BETWEEN 1990 AND 1994 THEN 1994
+                         ELSE t.production_year
+                              + floor(det_uniform(g, 34)*(2006-t.production_year))::integer END
+                WHEN event.label='(Blu-ray) (USA)' THEN
+                    GREATEST(2006,t.production_year)
+                    + floor(det_uniform(g, 34)*(2025-GREATEST(2006,t.production_year)))::integer
+                ELSE LEAST(2024,t.production_year+floor(det_uniform(g, 34)*3)::integer)
+            END AS year
+        ) release;
         """,
             count=company_rows,
+            depends_on=('title',),
         ),
         LoadTask(
             'movie_companies_anchors',
@@ -488,18 +533,23 @@ INSERT INTO movie_companies
             movie_id,
             company_id,
             company_type_id,
-            CASE company_id
-                WHEN 6 THEN '(Japan) (2006) (2007)'
-                WHEN 3 THEN '(co-production) (presents) Synthetic Warner Film Money'
-                WHEN 11 THEN '(co-production) (presents) Synthetic Film Money Warner'
-                WHEN 13 THEN NULL
-                ELSE '(co-production) (presents) (theatrical) (France) (VHS) (USA) '
-                     || '(1994) (worldwide) (2007) (2008) (Blu-ray) Synthetic Film Money Warner'
+            CASE
+                WHEN company_id=13 THEN NULL
+                WHEN company_id=6 THEN '(theatrical) (Japan) ('
+                    || GREATEST(2007,t.production_year)::text || ')'
+                WHEN company_id IN (3,11) THEN '(co-production) (presents) '
+                    || 'Synthetic Warner Film Money (' || t.production_year::text || ')'
+                WHEN company_type_id=1 AND t.production_year<=1994 THEN '(VHS) (USA) (1994)'
+                WHEN company_type_id=2 THEN '(Blu-ray) (USA) ('
+                    || GREATEST(2006,t.production_year)::text || ')'
+                ELSE '(theatrical) (France) (' || t.production_year::text || ')'
             END
         FROM generate_series(1, 22) AS movie_id
+        JOIN title t ON t.id=movie_id
         CROSS JOIN generate_series(1, 13) AS company_id
         CROSS JOIN generate_series(1, 2) AS company_type_id;
         """,
+            depends_on=('title',),
         ),
         LoadTask(
             'movie_info',
@@ -575,7 +625,8 @@ INSERT INTO movie_info_idx (id, movie_id, info_type_id, info, note)
 SELECT g, 1 + (g - 1) % {titles},
        CASE WHEN g <= {titles} THEN 3 ELSE 5 END,
        CASE WHEN g <= {titles}
-            THEN to_char(2.0 + det_uniform(1 + (g - 1) % {titles}, 1) * 8.0, 'FM99.0')
+            THEN CASE WHEN g=7 THEN '7.4'
+                      ELSE to_char(2.0 + det_uniform(g, 1) * 8.0, 'FM99.0') END
             ELSE (1000 + ((1 + (g - 1) % {titles}) * 15485863) % 500000)::text END,
        NULL
 FROM generate_series($1::bigint, $2::bigint) AS g;
@@ -669,7 +720,8 @@ INSERT INTO movie_link (id, movie_id, linked_movie_id, link_type_id)
         SELECT
             {movie_links} + (movie_id - 1) * 7 + link_type_id,
             movie_id,
-            CASE WHEN movie_id = 17 THEN 18 WHEN movie_id = 18 THEN 17 ELSE movie_id + 1 END,
+            CASE WHEN movie_id=21 AND link_type_id IN (1,2,4,6) THEN 19
+                 WHEN movie_id = 17 THEN 18 WHEN movie_id = 18 THEN 17 ELSE movie_id + 1 END,
             link_type_id
         FROM generate_series(1, 22) AS movie_id
         CROSS JOIN generate_series(1, 7) AS link_type_id;
@@ -695,10 +747,6 @@ INSERT INTO movie_link (id, movie_id, linked_movie_id, link_type_id)
 UPDATE imdb.cast_info ci
 SET role_id = CASE WHEN n.gender='f' THEN 2 ELSE 1 END
 FROM imdb.name n WHERE ci.person_id=n.id AND ci.role_id IN (1,2);
-UPDATE imdb.movie_companies mc
-SET note = regexp_replace(mc.note, '[(][12][0-9]{3}[)][ ]*', '', 'g')
-           || ' (' || t.production_year::text || ')'
-FROM imdb.title t WHERE t.id=mc.movie_id AND mc.note IS NOT NULL;
 UPDATE imdb.movie_info mi
 SET info = regexp_replace(mi.info, '[0-9]{4}', t.production_year::text)
 FROM imdb.title t

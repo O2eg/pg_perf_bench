@@ -16,7 +16,7 @@ SELECT * FROM bench_bounds \gset
 -- Return the selected copy, including rentals created after initialization.
 -- The partial unique inventory index locates at most one open rental.
 UPDATE rental
-SET return_date = rental_date + make_interval(days => :ret_days)
+SET return_date = GREATEST(rental_date, pagila.benchmark_now())
 WHERE inventory_id = :inventory_id AND return_date IS NULL;
 
 -- Customer contact update
@@ -29,7 +29,7 @@ WHERE customer_id = :customer_id;
 -- Re-price a film by its rental count
 UPDATE film f
 SET rental_rate = CASE
-        WHEN s.rentals > 50 THEN LEAST(f.rental_rate * 1.1, 4.99)
+        WHEN s.rentals > 50 THEN LEAST(f.rental_rate * 1.1, 5.99)
         WHEN s.rentals < 10 THEN GREATEST(f.rental_rate * 0.9, 0.99)
         ELSE f.rental_rate
     END
@@ -48,19 +48,29 @@ SET email = 'staff' || :suffix || '@example.test',
     password = 'pass' || :suffix
 WHERE staff_id = :staff_id;
 
--- Late fee on exactly one latest payment; partition-local customer/date indexes.
-WITH latest AS (
-    SELECT payment_date, payment_id FROM payment WHERE customer_id = :customer_id
-    ORDER BY payment_date DESC, payment_id DESC LIMIT 1
+-- Collect an unpaid late fee once, after return, using the agreed rental terms.
+-- Lock the rental before inserting its payment, in the same order as deletion.
+WITH candidate AS (
+    SELECT rental_id FROM rental
+    WHERE customer_id = :customer_id AND NOT late_fee_paid
+      AND return_date IS NOT NULL
+      AND return_date >= rental_date + (rental_duration + 1) * INTERVAL '24 hours'
+    ORDER BY return_date DESC, rental_id LIMIT 1 FOR UPDATE SKIP LOCKED
+), charged AS (
+    UPDATE rental r SET late_fee_paid = true FROM candidate c
+    WHERE r.rental_id = c.rental_id AND NOT r.late_fee_paid
+    RETURNING r.rental_id, r.customer_id, r.staff_id,
+        floor(extract(epoch FROM (r.return_date - r.rental_date))/86400
+              - r.rental_duration) AS amount
 )
-UPDATE payment p SET amount = p.amount + 1.00
-FROM latest WHERE p.payment_date = latest.payment_date AND p.payment_id = latest.payment_id;
+INSERT INTO payment (customer_id, staff_id, rental_id, amount, payment_date)
+SELECT customer_id, staff_id, rental_id, amount, pagila.benchmark_now() FROM charged;
 
 -- Film metadata drift (a CASE test parameter must be cast: prepared mode would type it text)
 UPDATE film
-SET rental_duration = GREATEST(3, LEAST(7, rental_duration
+SET rental_duration = GREATEST(2, LEAST(8, rental_duration
         + CASE :duration_roll::integer WHEN 0 THEN -1 WHEN 1 THEN 1 ELSE 0 END)),
-    replacement_cost = GREATEST(9.99, LEAST(29.99, replacement_cost + (:duration_roll - 5) * 0.2)),
+    replacement_cost = GREATEST(9.99, LEAST(34.99, replacement_cost + (:duration_roll - 5) * 0.2)),
     rating = CASE :rating_roll::integer
         WHEN 0 THEN 'G'::mpaa_rating
         WHEN 1 THEN 'PG'::mpaa_rating
@@ -71,16 +81,13 @@ SET rental_duration = GREATEST(3, LEAST(7, rental_duration
     END
 WHERE film_id = :film_id;
 
--- Touch overdue rentals of a customer
+-- Touch rentals overdue at the current logical time
 UPDATE rental r
 SET last_update = now()
-FROM inventory i
-JOIN film f ON f.film_id = i.film_id
-WHERE i.inventory_id = r.inventory_id
-  AND r.customer_id = :customer_id
+WHERE r.customer_id = :customer_id
   AND r.return_date IS NULL
-  AND r.rental_date + make_interval(days => f.rental_duration)
-      < to_timestamp(:data_start_epoch + :day * 86400);
+  AND r.rental_date + r.rental_duration * INTERVAL '24 hours'
+      < pagila.benchmark_now();
 
 -- Lock first, then check availability in a fresh READ COMMITTED snapshot.
 -- A rental committed while this lock was pending must prevent the move.

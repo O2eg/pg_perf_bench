@@ -80,19 +80,23 @@ async def run_local_process(
         start_new_session=True,
         limit=1024 * 1024,
     )
+    communication = asyncio.create_task(
+        process.communicate(input_text.encode() if input_text is not None else None)
+    )
     try:
         stdout_raw, stderr_raw = await asyncio.wait_for(
-            process.communicate(input_text.encode() if input_text is not None else None),
+            asyncio.shield(communication),
             timeout=deadline,
         )
     except asyncio.TimeoutError as exc:
         await _stop_process_group(process)
         command = redact_text(shlex.join(argv), tuple(secrets))
-        raise CommandTimeoutError(
-            f'Command timed out after {deadline:g} seconds: {command}'
-        ) from exc
-    except BaseException:
+        failure = CommandTimeoutError(f'Command timed out after {deadline:g} seconds: {command}')
+        await _attach_interrupted_output(failure, communication, process, argv, started, secrets)
+        raise failure from exc
+    except BaseException as exc:
         await _stop_process_group(process)
+        await _attach_interrupted_output(exc, communication, process, argv, started, secrets)
         raise
 
     result = ProcessResult(
@@ -114,6 +118,20 @@ async def run_local_process(
             )
         )
     return result
+
+
+async def _attach_interrupted_output(error, communication, process, argv, started, secrets):
+    try:
+        stdout, stderr = await asyncio.wait_for(communication, timeout=5)
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        stdout, stderr = b'', b'Output collection did not finish after process termination.'
+    error.failure = CommandFailure(
+        command=redact_text(shlex.join(argv), tuple(secrets)),
+        returncode=process.returncode,
+        stdout=redact_text(stdout.decode('utf-8', errors='replace'), tuple(secrets)),
+        stderr=redact_text(stderr.decode('utf-8', errors='replace'), tuple(secrets)),
+        elapsed_seconds=round(time.perf_counter() - started, 6),
+    )
 
 
 async def run_local_shell(

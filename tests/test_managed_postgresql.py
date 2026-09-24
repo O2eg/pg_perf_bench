@@ -19,6 +19,7 @@ from pg_perf_bench.managed import (
     read_managed_pg_info,
 )
 from pg_perf_bench.report.processing import save_report
+from tests.guard_helpers import mock_guard
 
 
 def managed_arguments(path):
@@ -179,6 +180,7 @@ def test_managed_run_only_uses_database_and_workload_clients(tmp_path):
                 'pg_perf_bench.benchmark.get_conn_type_tasks',
                 side_effect=AssertionError('host lifecycle'),
             ),
+            patch('pg_perf_bench.benchmark.InitializationSettings', side_effect=mock_guard),
             patch('pg_perf_bench.benchmark.DBTasks', return_value=tasks),
             patch('pg_perf_bench.benchmark.run_command_result', side_effect=command_result),
             patch(

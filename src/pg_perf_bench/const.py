@@ -13,6 +13,7 @@ else:
     from aenum import StrEnum
 
 VERSION = __version__
+MIN_SYSTEM_METRICS_INTERVAL = 5.0
 SOURCE_ROOT_FOLDER = Path(__file__).resolve().parent
 LOGS_FOLDER = Path('log')
 

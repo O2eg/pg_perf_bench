@@ -13,6 +13,7 @@ from typing import Any
 
 from pg_perf_bench.client_tools import select_local_clients
 from pg_perf_bench.const import (
+    MIN_SYSTEM_METRICS_INTERVAL,
     WORKLOAD_PROFILES_PATH,
     ConnectionType,
     WorkloadTypes,
@@ -132,6 +133,15 @@ def _required(value: Any, option: str) -> Any:
     return value
 
 
+def system_metrics_interval(value: Any) -> float:
+    parsed = _positive_float(value, '--system-metrics-interval')
+    if parsed < MIN_SYSTEM_METRICS_INTERVAL:
+        raise ConfigurationError(
+            f'--system-metrics-interval must be at least {MIN_SYSTEM_METRICS_INTERVAL:g} seconds'
+        )
+    return parsed
+
+
 def _report_name(value: Any) -> str | None:
     if value is None:
         return None
@@ -248,9 +258,10 @@ class WorkloadConfig:
     pg_custom_config: str | None = None
     allow_database_reset: bool = False
     reset_mode: str = 'database'
+    init_policy: str = 'each-iteration'
     managed: bool = False
     drop_os_caches: bool = False
-    system_metrics_interval: float = 1.0
+    system_metrics_interval: float = MIN_SYSTEM_METRICS_INTERVAL
     system_metrics_duration: float | None = None
     managed_pg_info: str | None = None
     init_mode: str = 'legacy'
@@ -261,6 +272,7 @@ class WorkloadConfig:
     init_fsync: str = 'off'
     init_synchronous_commit: str = 'keep'
     pgbench_protocol: str = 'simple'
+    statement_timeout_seconds: float | None = None
 
     def as_legacy_dict(self, host: HostConfig) -> dict[str, Any]:
         return {
@@ -280,6 +292,7 @@ class WorkloadConfig:
             'pg_custom_config': self.pg_custom_config,
             'allow_database_reset': self.allow_database_reset,
             'reset_mode': self.reset_mode,
+            'init_policy': self.init_policy,
             'managed': self.managed,
             'drop_os_caches': self.drop_os_caches,
             'system_metrics_interval': self.system_metrics_interval,
@@ -293,6 +306,7 @@ class WorkloadConfig:
             'init_fsync': self.init_fsync,
             'init_synchronous_commit': self.init_synchronous_commit,
             'pgbench_protocol': self.pgbench_protocol,
+            'statement_timeout_seconds': self.statement_timeout_seconds,
         }
 
 
@@ -410,7 +424,18 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
 
     workload: WorkloadConfig | None = None
     if mode == WorkMode.BENCHMARK:
-        if not values.get('allow_database_reset'):
+        init_policy = values.get('init_policy', 'each-iteration')
+        if init_policy not in ('each-iteration', 'once', 'skip'):
+            raise ConfigurationError('Unsupported initialization policy')
+        if init_policy == 'skip':
+            for option in ('pg_custom_config', 'drop_os_caches', 'init_command'):
+                if values.get(option):
+                    raise ConfigurationError(
+                        '--init-policy skip cannot be combined with --' + option.replace('_', '-')
+                    )
+        if init_policy != 'each-iteration' and values.get('drop_os_caches'):
+            raise ConfigurationError('--drop-os-caches requires --init-policy each-iteration')
+        if init_policy != 'skip' and not values.get('allow_database_reset'):
             raise ConfigurationError(
                 'benchmark resets the database or profile schemas; pass --allow-database-reset '
                 'after selecting a dedicated disposable database'
@@ -496,12 +521,12 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
                 Path(workload_path).expanduser().resolve()
             ):
                 raise ConfigurationError('Initialization entrypoint must be inside the profile')
-            if managed and values.get('init_fsync', 'off') == 'off':
+            if init_policy != 'skip' and managed and values.get('init_fsync', 'off') == 'off':
                 raise ConfigurationError('Managed fast initialization requires --init-fsync keep')
         reset_mode = values.get('reset_mode', 'database')
         if reset_mode not in ('database', 'schema'):
             raise ConfigurationError('Unsupported reset mode')
-        if reset_mode == 'schema':
+        if reset_mode == 'schema' and init_policy != 'skip':
             if init_mode != 'fast':
                 raise ConfigurationError('--reset-mode schema requires a common fast load plan')
             if values.get('init_fsync', 'off') != 'keep':
@@ -514,7 +539,7 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
         init_command = values.get('init_command') or (
             profile['benchmark'].get('init_command') if profile is not None else None
         )
-        if init_mode == 'legacy':
+        if init_mode == 'legacy' and init_policy != 'skip':
             _required(init_command, '--init-command')
         pgbench, psql = select_local_clients(
             values.get('pgbench_path'),
@@ -527,7 +552,15 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
                 '--workload-command',
             )
         )
+        statement_timeout = values.get('statement_timeout_seconds')
+        if statement_timeout is None and profile is not None:
+            statement_timeout = profile['benchmark'].get('default_statement_timeout_seconds')
+        if statement_timeout is not None:
+            statement_timeout = _positive_float(statement_timeout, '--statement-timeout-seconds')
+            if statement_timeout > 2147483.647:
+                raise ConfigurationError('--statement-timeout-seconds exceeds PostgreSQL limit')
         workload = WorkloadConfig(
+            statement_timeout_seconds=statement_timeout,
             benchmark_type=benchmark_type,
             init_command=str(init_command or ''),
             init_mode=init_mode,
@@ -552,14 +585,14 @@ def build_runtime_config(args: Any) -> RuntimeConfig:
             workload_scale=_positive_float(values.get('workload_scale', 1.0), '--workload-scale'),
             workload_duration_seconds=workload_duration_seconds,
             pg_custom_config=custom_config,
-            allow_database_reset=True,
+            allow_database_reset=bool(values.get('allow_database_reset')),
+            init_policy=init_policy,
             reset_mode=reset_mode,
             managed=managed,
             managed_pg_info=managed_pg_info,
             drop_os_caches=bool(values.get('drop_os_caches')),
-            system_metrics_interval=_positive_float(
-                values.get('system_metrics_interval', 1.0),
-                '--system-metrics-interval',
+            system_metrics_interval=system_metrics_interval(
+                values.get('system_metrics_interval', MIN_SYSTEM_METRICS_INTERVAL),
             ),
             system_metrics_duration=(
                 _positive_float(

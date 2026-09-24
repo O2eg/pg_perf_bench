@@ -354,6 +354,8 @@ def build_workload_evidence(
                     source['external'] = True
                     sources.append(source)
                     source_by_path[path.resolve()] = source
+                elif phase == 'query' and source['role'] == 'planner_queries':
+                    source['role'] = 'query'
                 elif not profile_id and source['path'] not in roles:
                     source['role'] = phase
     sources.sort(key=lambda source: source['path'])
@@ -366,15 +368,33 @@ def build_workload_evidence(
         'init_command_template': workload_conf.get('init_command'),
         'workload_command_template': workload_conf.get('workload_command'),
         'workload_scale': workload_conf.get('workload_scale'),
+        **(
+            {'statement_timeout_seconds': workload_conf['statement_timeout_seconds']}
+            if workload_conf.get('statement_timeout_seconds') is not None
+            else {}
+        ),
         'sources': source_fingerprints,
     }
+    from pg_perf_bench.init_policy import initializes_iteration
+
     resolved_commands = [
-        {'iteration_index': index, 'init': commands[0], 'workload': commands[1]}
+        {
+            'iteration_index': index,
+            'init': commands[0]
+            if initializes_iteration(workload_conf.get('init_policy', 'each-iteration'), index)
+            else None,
+            'workload': commands[1],
+        }
         for index, commands in enumerate(load_iterations, start=1)
     ]
     pgbench = {
         'pgbench_path': workload_conf.get('pgbench_path'),
         'pgbench_protocol': workload_conf.get('pgbench_protocol', 'simple'),
+        **(
+            {'statement_timeout_seconds': workload_conf['statement_timeout_seconds']}
+            if workload_conf.get('statement_timeout_seconds') is not None
+            else {}
+        ),
         'psql_path': workload_conf.get('psql_path'),
         'iteration_parameter': workload_conf.get('pgbench_iter_name'),
         'iteration_values': list(workload_conf.get('pgbench_iter_list') or []),
@@ -382,7 +402,10 @@ def build_workload_evidence(
         'workload_command_template': workload_conf.get('workload_command'),
         'resolved_commands': resolved_commands,
     }
-    initialization = {'mode': workload_conf.get('init_mode', 'legacy')}
+    initialization = {
+        'mode': workload_conf.get('init_mode', 'legacy'),
+        'policy': workload_conf.get('init_policy', 'each-iteration'),
+    }
     if initialization['mode'] == 'fast':
         from pg_perf_bench.initialization import LoadOptions
 

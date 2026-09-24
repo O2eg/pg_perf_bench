@@ -111,28 +111,16 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
     v_rentfees numeric;
-    v_overfees INTEGER;
+    v_overfees numeric;
     v_payments numeric;
 BEGIN
-    SELECT COALESCE(SUM(film.rental_rate),0) INTO v_rentfees
-    FROM film, inventory, rental
-    WHERE film.film_id = inventory.film_id
-      AND inventory.inventory_id = rental.inventory_id
-      AND rental.rental_date <= p_effective_date
-      AND rental.customer_id = p_customer_id;
-
-    SELECT COALESCE(SUM(
-        CASE
-            WHEN EXTRACT(EPOCH FROM (LEAST(COALESCE(rental.return_date, p_effective_date), p_effective_date) - rental.rental_date))/86400 > film.rental_duration
-            THEN EXTRACT(EPOCH FROM (LEAST(COALESCE(rental.return_date, p_effective_date), p_effective_date) - rental.rental_date))/86400 - film.rental_duration
-            ELSE 0
-        END
-    )::integer,0) INTO v_overfees
-    FROM rental, inventory, film
-    WHERE film.film_id = inventory.film_id
-      AND inventory.inventory_id = rental.inventory_id
-      AND rental.rental_date <= p_effective_date
-      AND rental.customer_id = p_customer_id;
+    SELECT COALESCE(SUM(r.rental_rate),0),
+           COALESCE(SUM(GREATEST(0, floor(extract(epoch FROM (
+               LEAST(COALESCE(r.return_date, p_effective_date), p_effective_date)
+               - r.rental_date)) / 86400 - r.rental_duration))),0)
+    INTO v_rentfees, v_overfees
+    FROM pagila.rental r
+    WHERE r.rental_date <= p_effective_date AND r.customer_id = p_customer_id;
 
     SELECT COALESCE(SUM(payment.amount),0) INTO v_payments
     FROM payment
@@ -619,7 +607,7 @@ CREATE TABLE pagila.payment (
     customer_id bigint NOT NULL,
     staff_id bigint NOT NULL,
     rental_id bigint NOT NULL,
-    amount numeric(5,2) NOT NULL,
+    amount numeric(12,2) NOT NULL,
     payment_date timestamp with time zone NOT NULL
 )
 PARTITION BY RANGE (payment_date);
@@ -633,7 +621,7 @@ CREATE TABLE pagila.payment_p2022_01 (
     customer_id bigint NOT NULL,
     staff_id bigint NOT NULL,
     rental_id bigint NOT NULL,
-    amount numeric(5,2) NOT NULL,
+    amount numeric(12,2) NOT NULL,
     payment_date timestamp with time zone NOT NULL
 );
 
@@ -646,7 +634,7 @@ CREATE TABLE pagila.payment_p2022_02 (
     customer_id bigint NOT NULL,
     staff_id bigint NOT NULL,
     rental_id bigint NOT NULL,
-    amount numeric(5,2) NOT NULL,
+    amount numeric(12,2) NOT NULL,
     payment_date timestamp with time zone NOT NULL
 );
 
@@ -659,7 +647,7 @@ CREATE TABLE pagila.payment_p2022_03 (
     customer_id bigint NOT NULL,
     staff_id bigint NOT NULL,
     rental_id bigint NOT NULL,
-    amount numeric(5,2) NOT NULL,
+    amount numeric(12,2) NOT NULL,
     payment_date timestamp with time zone NOT NULL
 );
 
@@ -672,7 +660,7 @@ CREATE TABLE pagila.payment_p2022_04 (
     customer_id bigint NOT NULL,
     staff_id bigint NOT NULL,
     rental_id bigint NOT NULL,
-    amount numeric(5,2) NOT NULL,
+    amount numeric(12,2) NOT NULL,
     payment_date timestamp with time zone NOT NULL
 );
 
@@ -685,7 +673,7 @@ CREATE TABLE pagila.payment_p2022_05 (
     customer_id bigint NOT NULL,
     staff_id bigint NOT NULL,
     rental_id bigint NOT NULL,
-    amount numeric(5,2) NOT NULL,
+    amount numeric(12,2) NOT NULL,
     payment_date timestamp with time zone NOT NULL
 );
 
@@ -698,7 +686,7 @@ CREATE TABLE pagila.payment_p2022_06 (
     customer_id bigint NOT NULL,
     staff_id bigint NOT NULL,
     rental_id bigint NOT NULL,
-    amount numeric(5,2) NOT NULL,
+    amount numeric(12,2) NOT NULL,
     payment_date timestamp with time zone NOT NULL
 );
 
@@ -711,7 +699,7 @@ CREATE TABLE pagila.payment_p2022_07 (
     customer_id bigint NOT NULL,
     staff_id bigint NOT NULL,
     rental_id bigint NOT NULL,
-    amount numeric(5,2) NOT NULL,
+    amount numeric(12,2) NOT NULL,
     payment_date timestamp with time zone NOT NULL
 );
 
@@ -736,6 +724,10 @@ CREATE TABLE pagila.rental (
     inventory_id bigint NOT NULL,
     customer_id bigint NOT NULL,
     return_date timestamp with time zone,
+    rental_rate numeric(5,2) NOT NULL CHECK (rental_rate >= 0),
+    rental_duration smallint NOT NULL CHECK (rental_duration > 0),
+    late_fee_paid boolean DEFAULT false NOT NULL,
+    CHECK (return_date IS NULL OR return_date >= rental_date),
     staff_id bigint NOT NULL,
     last_update timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -909,6 +901,12 @@ ALTER TABLE ONLY pagila.payment ATTACH PARTITION pagila.payment_p2022_06 FOR VAL
 --
 
 ALTER TABLE ONLY pagila.payment ATTACH PARTITION pagila.payment_p2022_07 FOR VALUES FROM ('2022-07-01 01:00:00+01') TO ('2022-08-01 01:00:00+01');
+
+-- Keep long-running logical-clock workloads routable beyond the initial months.
+CREATE TABLE pagila.payment_future (LIKE pagila.payment INCLUDING DEFAULTS);
+ALTER TABLE pagila.payment ATTACH PARTITION pagila.payment_future
+    FOR VALUES FROM ('2022-08-01 00:00:00+00') TO (MAXVALUE);
+
 
 -- PostgreSQL 10 cannot own a primary key on a partitioned parent.  Keep the
 -- same key columns by placing the constraint on every leaf there; PostgreSQL
@@ -1693,3 +1691,23 @@ GRANT ALL ON SCHEMA public TO PUBLIC;
 --
 -- PostgreSQL database dump complete
 --
+
+
+
+ALTER TABLE ONLY pagila.payment_p2022_07
+    ADD CONSTRAINT payment_p2022_07_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES pagila.customer(customer_id);
+
+ALTER TABLE ONLY pagila.payment_p2022_07
+    ADD CONSTRAINT payment_p2022_07_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES pagila.rental(rental_id);
+
+ALTER TABLE ONLY pagila.payment_p2022_07
+    ADD CONSTRAINT payment_p2022_07_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES pagila.staff(staff_id);
+
+ALTER TABLE ONLY pagila.payment_future
+    ADD CONSTRAINT payment_future_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES pagila.customer(customer_id);
+
+ALTER TABLE ONLY pagila.payment_future
+    ADD CONSTRAINT payment_future_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES pagila.rental(rental_id);
+
+ALTER TABLE ONLY pagila.payment_future
+    ADD CONSTRAINT payment_future_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES pagila.staff(staff_id);

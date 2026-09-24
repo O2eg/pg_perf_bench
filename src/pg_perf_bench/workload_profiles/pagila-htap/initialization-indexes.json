@@ -342,5 +342,25 @@
   {
     "name": "payment_p2022_07_customer_date_idx",
     "sql": "CREATE INDEX payment_p2022_07_customer_date_idx ON pagila.payment_p2022_07 (customer_id, payment_date DESC, payment_id DESC);"
+  },
+  {
+    "name": "payment_future_rental_id_idx",
+    "sql": "CREATE INDEX payment_future_rental_id_idx ON pagila.payment_future USING btree (rental_id);"
+  },
+  {
+    "name": "payment_future_pkey",
+    "sql": "CREATE UNIQUE INDEX payment_future_pkey ON pagila.payment_future (payment_date, payment_id)"
+  },
+  {
+    "name": "payment_future_staff_date_idx",
+    "sql": "CREATE INDEX payment_future_staff_date_idx ON pagila.payment_future (staff_id, payment_date, rental_id);"
+  },
+  {
+    "name": "payment_future_customer_date_idx",
+    "sql": "CREATE INDEX payment_future_customer_date_idx ON pagila.payment_future (customer_id, payment_date DESC, payment_id DESC);"
+  },
+  {
+    "name": "rental_unpaid_fee_customer_idx",
+    "sql": "CREATE INDEX rental_unpaid_fee_customer_idx ON pagila.rental (customer_id, return_date DESC, rental_id) WHERE NOT late_fee_paid AND return_date IS NOT NULL;"
   }
 ]

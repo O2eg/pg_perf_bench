@@ -14,19 +14,17 @@ identical on every server major.
 
 ## Approximate database sizes
 
-Reference footprint on PostgreSQL 18.6 with the corrected generator and indexes,
-before running the workload: scale 50 occupied **517,469,887 bytes** in
-the database, including **190,332,928 bytes of table storage** and **314,703,872
-bytes of indexes**. The remaining approximately 12 MB is database overhead.
-Pagila and Pagila HTAP use the same initial data and indexes, so their initial
-size estimates are the same; the subsequent write workload can change their sizes.
+Reference PostgreSQL 18 footprint for the current model at scale 72 is approximately
+**805 MB per database**, including **296 MB of table storage** and **499 MB of indexes**.
+Pagila and Pagila HTAP share the same initial data and indexes; subsequent writes
+change their sizes. Figures are rounded, and fixed database overhead is not scaled.
 
 | Target database size, including indexes | Approximate `--workload-scale` | Table storage | Index storage | Films |
 | --- | ---: | ---: | ---: | ---: |
-| 1 GB | 100 | 0.38 GB | 0.63 GB | 100,000 |
-| 10 GB | 1000 | 3.8 GB | 6.3 GB | 1,000,000 |
-| 100 GB | 10000 | 38 GB | 63 GB | 10,000,000 |
-| 1 TB | 100000 | 381 GB | 629 GB | 100,000,000 |
+| 1 GB | 90 | 0.37 GB | 0.62 GB | 90,000 |
+| 10 GB | 900 | 3.7 GB | 6.2 GB | 900,000 |
+| 100 GB | 9000 | 37 GB | 62 GB | 9,000,000 |
+| 1 TB | 90000 | 370 GB | 624 GB | 90,000,000 |
 
 Units are decimal: **1 GB = 10^9 bytes; 1 TB = 1000 GB**. Targets and scale
 values are rounded starting points, obtained by extrapolating measured table and
@@ -41,8 +39,8 @@ not the required free disk space. Scale units differ between profiles.
 
 Four pgbench scripts run with fixed weights: `01_select` 50 %, `02_insert` 25 %,
 `03_update` 20 %, `04_delete` 5 %. Every random identifier is chosen by pgbench within
-table bounds read from the one-row `bench_bounds` table, and dates are offsets
-inside the actual loaded 2022 rental range, including small scales. Identifier selection avoids scans
+table bounds read from the one-row `bench_bounds` table. Historical read dates cover
+the loaded rental, return and payment timeline, including small scales. Identifier selection avoids scans
 over growing tables, while transaction cost still depends on data size and caching.
 `--random-seed=42` repeats random choices with the same client configuration; timed runs
 can still complete different numbers of transactions and yield different mix proportions.
@@ -78,18 +76,43 @@ Use a dedicated disposable database. Every point is initialized from the same ge
 which prevents mutations from an earlier concurrency point contaminating a later one.
 
 Selective access paths cover customer/date history, cashier/date activity,
-customer/latest-payment lookup, film/store inventory, and open rentals. The film
+customer/unpaid-fee lookup, film/store inventory, and open rentals. The film
 card aggregates cast and inventory independently instead of multiplying them.
-Only one payment is changed by the latest-payment operation. Stock checks use
-EXISTS and the partial index for open rentals.
+A fee operation locks one eligible rental and inserts its payment once. Existing
+receipts are not repeatedly increased. Stock checks use EXISTS and the partial index
+for open rentals.
 
-Each generated rental/payment names the issuing store's manager. Only the latest
-rental of a copy may be initially open; a partial unique index prevents duplicate
-open rentals during concurrent inserts. Rental dates remain synthetic historical
-events, and the generator does not model every physical overlap or customer journey.
-The effective-date balance calculation excludes fees after the requested date.
+## Data and time contract
+
+Fractional scales are supported. Modular mappings use strides coprime to the actual
+cardinality: stores/cities stay covered, and a film's three to seven actors are distinct.
+Each generated rental/payment names the issuing store's manager. Copies receive
+non-overlapping histories: independently distributed starting phases and rentals nine
+days apart, lasting one to eight days. Only the last rental of a copy may remain open;
+a partial unique index also prevents concurrent open rentals during the workload.
+
+Each rental stores its agreed `rental_rate` and `rental_duration`. Catalog repricing
+cannot change historical balances or due dates. Initial receipts total the agreed
+base fee; rentals with an extra receipt split that fee into two installments instead
+of generating an unrelated overpayment. Overdue charges are one currency unit per
+complete day beyond the agreed duration, calculated separately for each rental.
+`get_customer_balance(customer, effective_date)` includes only rentals, accrued fees
+and receipts up to that date. Historical overdue queries include later returns.
+
+`benchmark_now()` advances a logical clock from the day after the loaded history.
+New rentals, immediate base-fee payments, registrations and returns use that clock.
+A return closes the loan at the current logical time, so short benchmark rentals may
+last only milliseconds; no randomly backdated rental or future-dated return is made.
+After a late return, one eligible fee can be collected once via an atomic row-locked
+operation. The historical accrued debt already exists; collecting it adds a new receipt.
+Deletion locks the rental before removing payments, using the same lock order as fees.
+
+Payment partitions cover January–July 2022, plus an indexed future range partition
+for longer-running logical clocks. Payment amounts use `numeric(12,2)`. Film rates
+stay within 0.99–5.99, durations within two to eight days, and replacement costs within
+9.99–34.99 across generation and catalog updates.
 
 Both initializer paths install the same indexes and compute `data_start_epoch`,
-`data_days` and `report_window_days` in `bench_bounds`. Time-window changes and
+`data_days`, `report_window_days` and logical-clock anchors in `bench_bounds`. Time-window changes and
 new data invariants require a fresh initialization; comparisons with older workload
 versions must use new runs on both environments.

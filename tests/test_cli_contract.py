@@ -191,6 +191,39 @@ def test_benchmark_requires_explicit_database_reset_confirmation():
         build_runtime_config(args)
 
 
+@pytest.mark.parametrize('value', ['0', '-1', '0.1', '1', '4.999', 'nan', 'inf', '-inf'])
+def test_cli_rejects_os_sampling_intervals_below_five_seconds(value, capsys):
+    with patch('pg_perf_bench.cli.execute_namespace', AsyncMock()) as execute:
+        code = main(['--machine', 'benchmark', f'--system-metrics-interval={value}'])
+    assert code == 2
+    execute.assert_not_awaited()
+    output = json.loads(capsys.readouterr().out)
+    assert '--system-metrics-interval' in json.dumps(output)
+
+
+@pytest.mark.parametrize('value', [None, '5', '5.5', '30'])
+def test_cli_os_sampling_default_and_supported_intervals(value):
+    options = [] if value is None else ['--system-metrics-interval', value]
+    args = build_parser().parse_args([*_benchmark_arguments(), '--allow-database-reset', *options])
+    with patch(
+        'pg_perf_bench.config.select_local_clients', return_value=(MagicMock(), MagicMock())
+    ):
+        config = build_runtime_config(args)
+    expected = 5.0 if value is None else float(value)
+    assert args.system_metrics_interval == expected
+    assert config.workload.system_metrics_interval == expected
+
+
+def test_runtime_config_cannot_bypass_os_sampling_minimum():
+    args = build_parser().parse_args([*_benchmark_arguments(), '--allow-database-reset'])
+    args.system_metrics_interval = 1.0
+    with (
+        patch('pg_perf_bench.config.select_local_clients', return_value=(MagicMock(), MagicMock())),
+        pytest.raises(ConfigurationError, match='at least 5 seconds'),
+    ):
+        build_runtime_config(args)
+
+
 def test_benchmark_refuses_protected_database_even_when_confirmed():
     args = build_parser().parse_args([*_benchmark_arguments('postgres'), '--allow-database-reset'])
     with pytest.raises(ConfigurationError, match='protected database'):

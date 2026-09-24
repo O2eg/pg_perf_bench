@@ -54,6 +54,9 @@ CREATE INDEX person_movie_lookup ON cast_info(person_id, movie_id, role_id);
 CREATE UNIQUE INDEX complete_cast_one_status ON complete_cast(movie_id, subject_id);
 CREATE UNIQUE INDEX movie_link_unique ON movie_link(movie_id, linked_movie_id, link_type_id);
 
+CREATE INDEX title_name_pattern ON title(title text_pattern_ops);
+CREATE INDEX name_ordered_search ON name(name,id);
+
 analyze aka_name;
 analyze aka_title;
 analyze cast_info;

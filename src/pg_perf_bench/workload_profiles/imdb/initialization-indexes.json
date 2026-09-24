@@ -278,5 +278,13 @@
   {
     "name": "movie_link_unique",
     "sql": "CREATE UNIQUE INDEX movie_link_unique ON movie_link(movie_id, linked_movie_id, link_type_id);"
+  },
+  {
+    "name": "title_name_pattern",
+    "sql": "CREATE INDEX title_name_pattern ON title(title text_pattern_ops);"
+  },
+  {
+    "name": "name_ordered_search",
+    "sql": "CREATE INDEX name_ordered_search ON name(name,id);"
   }
 ]

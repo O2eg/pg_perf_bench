@@ -1,7 +1,7 @@
 -- pagila OLTP: write transactions. An available copy is rented with its payment;
 -- customer registration, catalogue and staff changes are gated by pgbench-side
 -- probabilities, so the mix stays shop-like and reproducible under --random-seed. Dates
--- stay inside the 2022 payment partitions (2022-01-01 .. 2022-07-31).
+-- use a logical clock after the generated history; later payments have a future partition.
 -- Table bounds come from pagila.bench_bounds, a one-row table filled by the setup script,
 -- so identifier selection costs one single-row read instead of a scan per table.
 SELECT * FROM bench_bounds \gset
@@ -31,24 +31,23 @@ SELECT * FROM bench_bounds \gset
 -- unique index also prevents races from creating two open rentals for one copy.
 BEGIN;
 WITH available AS (
-    SELECT i.inventory_id, s.manager_staff_id AS staff_id
+    SELECT i.inventory_id, s.manager_staff_id AS staff_id, f.rental_rate, f.rental_duration
     FROM inventory i JOIN store s ON s.store_id = i.store_id
+    JOIN film f ON f.film_id = i.film_id
     WHERE i.inventory_id = :inventory_id
       AND NOT EXISTS (SELECT 1 FROM rental r WHERE r.inventory_id = i.inventory_id
                                               AND r.return_date IS NULL)
     FOR UPDATE OF i SKIP LOCKED
 ), new_rental AS (
-    INSERT INTO rental (rental_date, inventory_id, customer_id, staff_id)
-    SELECT to_timestamp(:data_start_epoch + :day * 86400 + :sec),
-           inventory_id, :customer_id::bigint, staff_id FROM available
+    INSERT INTO rental (rental_date, inventory_id, customer_id, staff_id, rental_rate, rental_duration)
+    SELECT pagila.benchmark_now(), inventory_id, :customer_id::bigint, staff_id,
+           rental_rate, rental_duration FROM available
     ON CONFLICT DO NOTHING
-    RETURNING rental_id, rental_date, staff_id
+    RETURNING rental_id, rental_date, staff_id, rental_rate
 )
 INSERT INTO payment (customer_id, staff_id, rental_id, amount, payment_date)
 SELECT :customer_id::bigint, nr.staff_id, nr.rental_id,
-       (SELECT f.rental_rate FROM inventory i JOIN film f ON f.film_id = i.film_id
-        WHERE i.inventory_id = :inventory_id),
-       nr.rental_date + make_interval(hours => :hours)
+       nr.rental_rate, nr.rental_date
 FROM new_rental nr;
 COMMIT;
 
@@ -75,7 +74,7 @@ SELECT
     'customer' || :suffix || '@example.test',
     na.address_id,
     true,
-    (to_timestamp(:data_start_epoch + :day * 86400))::date,
+    (pagila.benchmark_now() AT TIME ZONE 'UTC')::date,
     1
 FROM new_address AS na;
 COMMIT;
@@ -93,7 +92,7 @@ WITH new_film AS (
         'Description ' || :suffix,
         (2000 + :suffix % 23)::year,
         :language_id,
-        1 + :suffix % 7,
+        2 + :suffix % 7,
         (0.99 + (:suffix % 5))::numeric(4,2),
         60 + :suffix % 120,
         (9.99 + (:suffix % 20))::numeric(5,2),

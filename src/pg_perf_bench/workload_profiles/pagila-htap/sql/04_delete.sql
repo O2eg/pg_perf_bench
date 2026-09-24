@@ -5,7 +5,8 @@
 SELECT * FROM bench_bounds \gset
 \set rental_id random(1, :max_rental)
 
-BEGIN;
+BEGIN ISOLATION LEVEL READ COMMITTED;
+SELECT rental_id FROM rental WHERE rental_id = :rental_id FOR UPDATE;
 DELETE FROM payment WHERE rental_id = :rental_id;
 DELETE FROM rental WHERE rental_id = :rental_id;
 COMMIT;

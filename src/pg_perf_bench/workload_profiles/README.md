@@ -6,9 +6,12 @@ maximum-TPS measurement. They intentionally do not contain `profile.yml`: that m
 belongs to the scheduling semantics of `pg_workload`, while `pg_perf_bench` controls a
 client sweep, database reset and evidence collection itself.
 
-List installed profiles with `pg-perf-bench profiles`. `imdb` is the complete 21-table,
-38-script analytical workload shared with `pg_workload/imdb`; `pagila` is a pure OLTP mix with
-fixed script weights; `pagila-htap` adds a 5 % reporting script to it. All profiles
+List installed profiles with `pg-perf-bench profiles`. `imdb` is a 21-table,
+read-only movie-catalog workload with 11 active scripts, three disabled scripts and
+a separate archived planner-probe set; `pagila` is a read/write OLTP mix with
+fixed script weights; `pagila-htap` adds a read-only reporting script with weight
+5 out of 105 (about 4.8%). See the [profile comparison table](../../../README.md#bundled-workload-profiles)
+for data access, script weights, TPS interpretation and temporary-file I/O. All profiles
 use simple protocol by default; add `--pgbench-prepared` for prepared statements. Select one with
 `pg-perf-bench benchmark --workload-profile imdb ...` or `pagila`. The profile supplies
 the common load plan and legacy initialization/workload command templates;

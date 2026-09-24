@@ -171,8 +171,8 @@ def test_customer_balance_respects_effective_date():
                 WHERE film_id=(SELECT film_id FROM inventory WHERE inventory_id=1)""")
             rental = await conn.fetchval(
                 """INSERT INTO rental
-                (customer_id,inventory_id,staff_id,rental_date,return_date)
-                VALUES ($1,1,1,'2022-01-01 00:00:00+00','2022-01-10 00:00:00+00')
+                (customer_id,inventory_id,staff_id,rental_rate,rental_duration,rental_date,return_date)
+                VALUES ($1,1,1,5,3,'2022-01-01 00:00:00+00','2022-01-10 00:00:00+00')
                 RETURNING rental_id""",
                 customer,
             )
@@ -233,6 +233,8 @@ def test_oltp_read_and_update_plans_use_indexes():
     async def run():
         conn = await connect()
         try:
+            if await conn.fetchval('SELECT count(*) FROM rental') < 100_000:
+                pytest.skip('index plan check requires scale >= 7; small tables may use seqscan')
             bounds = dict(await conn.fetchrow('SELECT * FROM bench_bounds'))
             values = {
                 name: 1
@@ -432,12 +434,13 @@ def test_move_rechecks_rental_after_inventory_lock_wait(outcome):
             insert, _, move = rental_sql(inventory_id, bounds)
             await renter.execute('BEGIN')
             assert await renter.execute(insert) == 'INSERT 0 1'
+            mover_pid = await mover.fetchval('SELECT pg_backend_pid()')
             moving = asyncio.create_task(mover.execute(move))
             # Synchronize on the real row lock, not a timing assumption.
             for _ in range(300):
                 waiting = await observer.fetchval(
                     "SELECT wait_event_type='Lock' FROM pg_stat_activity WHERE pid=$1",
-                    mover.get_server_pid(),
+                    mover_pid,
                 )
                 if waiting:
                     break

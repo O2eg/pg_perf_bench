@@ -212,11 +212,12 @@ def test_legacy_run_recovers_interrupted_fast_settings_before_reset():
     from pg_perf_bench.benchmark import BenchmarkRunner
 
     async def scenario():
-        guard = MagicMock(open=AsyncMock(), close=AsyncMock())
+        guard = MagicMock(open=AsyncMock(), close=AsyncMock(), assert_held=AsyncMock())
 
-        async def reset(*args):
+        async def reset(*args, **kwargs):
             guard.open.assert_awaited_once_with(recover_only=True)
-            guard.close.assert_awaited_once()
+            guard.close.assert_not_awaited()
+            assert kwargs['reset_guard'] is guard
 
         with (
             patch('pg_perf_bench.benchmark.InitializationSettings', return_value=guard) as factory,

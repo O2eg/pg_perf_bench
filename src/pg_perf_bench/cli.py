@@ -15,15 +15,17 @@ from typing import Any
 from pg_perf_bench import __version__
 from pg_perf_bench.benchmark import BenchmarkRunner
 from pg_perf_bench.collect_info import InfoCollector
-from pg_perf_bench.config import RuntimeConfig, build_runtime_config
+from pg_perf_bench.config import RuntimeConfig, build_runtime_config, system_metrics_interval
 from pg_perf_bench.const import (
     ALL_INFO_TEMPLATE_JSON_PATH,
     DB_INFO_TEMPLATE_JSON_PATH,
+    MIN_SYSTEM_METRICS_INTERVAL,
     SYS_INFO_TEMPLATE_JSON_PATH,
     ConnectionType,
     LogLevel,
     WorkloadTypes,
     WorkMode,
+    get_default_report_name,
 )
 from pg_perf_bench.contracts import (
     ARTIFACT_SCHEMA_VERSION,
@@ -202,6 +204,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     benchmark.add_argument('--workload-profile', choices=bundled_profile_names())
     benchmark.add_argument('--workload-path')
+    benchmark.add_argument(
+        '--statement-timeout-seconds',
+        type=positive_float,
+        help='server time limit per statement in pgbench SQL files; IMDb defaults to 300s',
+    )
     benchmark.add_argument('--workload-scale', type=positive_float, default=1.0)
     benchmark.add_argument(
         '--workload-duration-seconds',
@@ -212,6 +219,12 @@ def build_parser() -> argparse.ArgumentParser:
     iterations.add_argument('--pgbench-clients', type=parse_pgbench_options)
     iterations.add_argument('--pgbench-time', type=parse_pgbench_options)
     benchmark.add_argument('--init-command')
+    benchmark.add_argument(
+        '--init-policy',
+        choices=('each-iteration', 'once', 'skip'),
+        default='each-iteration',
+        help='reset/load before every iteration (default), only the first, or use existing data',
+    )
     benchmark.add_argument(
         '--init-mode',
         choices=('auto', 'fast', 'legacy'),
@@ -259,14 +272,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     benchmark.add_argument(
         '--system-metrics-interval',
-        type=positive_float,
-        default=1.0,
-        help='sampling interval for pg_diag CPU, RAM, disk, and network metrics',
+        type=system_metrics_interval,
+        default=MIN_SYSTEM_METRICS_INTERVAL,
+        help='sampling interval in seconds for OS metrics (minimum and default: 5)',
     )
     benchmark.add_argument(
         '--system-metrics-duration',
         type=positive_float,
-        help='sampling window; by default it is inferred from pgbench --time/-T',
+        help='optional OS sampling time limit; by default sample until pgbench exits',
     )
     benchmark.add_argument(
         '--allow-database-reset',
@@ -402,6 +415,7 @@ def capabilities() -> dict[str, Any]:
                 'managed_pg_info_option': '--managed-pg-info',
                 'managed_option': '--managed',
                 'reset_modes': ['database', 'schema'],
+                'init_policies': ['each-iteration', 'once', 'skip'],
             },
             'collect-sys-info': {
                 'mutates_target': False,
@@ -574,13 +588,15 @@ async def execute_namespace(args: argparse.Namespace, logger) -> dict[str, Any] 
         assert config.database is not None and config.workload is not None
         workload = config.workload.as_legacy_dict(config.host)
         workload['command_timeout'] = config.host.command_timeout
+        report_name = config.report_name or f'benchmark-{get_default_report_name()}'
+        workload['checkpoint_path'] = str(config.report_dir / f'{report_name}.progress.json')
         return await BenchmarkRunner.run_benchmark_and_collect_metrics(
             args=run_args,
             conn_type=str(config.host.connection_type),
             conn_conf=connection_kwargs,
             db_conf=config.database.as_legacy_dict(),
             workload_conf=workload,
-            report_conf={'report_name': config.report_name},
+            report_conf={'report_name': report_name},
             log_conf=log_conf,
             logger=logger,
         )
@@ -813,8 +829,10 @@ def main(argv: list[str] | None = None) -> int:
             os.environ.get('PGPASSWORD'),
         )
         warnings = [redact_text(warning, warning_secrets) for warning in warnings]
+        benchmark_status = report.get('benchmark_status')
+        interrupted = benchmark_status in {'failed', 'cancelled'}
         report['collection_summary'] = {
-            'status': 'partial' if warnings else 'succeeded',
+            'status': 'partial' if interrupted or warnings else 'succeeded',
             'warning_count': len(warnings),
         }
         artifact_paths = save_report(logger, report, str(config.report_dir))
@@ -830,10 +848,30 @@ def main(argv: list[str] | None = None) -> int:
         if args.machine:
             _emit_machine(
                 args,
-                'partial' if warnings else 'succeeded',
+                benchmark_status if interrupted else 'partial' if warnings else 'succeeded',
                 result=result,
                 artifacts=artifacts,
                 warnings=warnings,
+                **(
+                    {
+                        'error': {
+                            'code': 'cancelled'
+                            if benchmark_status == 'cancelled'
+                            else 'execution_error',
+                            'message': report.get('benchmark_error', 'Benchmark stopped'),
+                        }
+                    }
+                    if interrupted
+                    else {}
+                ),
+            )
+        if interrupted:
+            if not args.machine:
+                print(f'Benchmark {benchmark_status}; partial reports saved.', file=sys.stderr)
+            return (
+                (EXIT_CODES['cancelled'] if args.machine else 130)
+                if (benchmark_status == 'cancelled')
+                else EXIT_CODES['execution_error']
             )
         return EXIT_CODES['partial'] if warnings else EXIT_CODES['success']
     except ConfigurationError as exc:

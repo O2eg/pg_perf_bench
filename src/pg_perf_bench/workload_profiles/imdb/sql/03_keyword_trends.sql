@@ -1,4 +1,7 @@
-SET search_path = imdb;
+/* Disabled pending performance optimization.
+Excluded from the default pgbench workload; preserved for revision.
+
+SET search_path=imdb;
 
 SELECT
     (t.production_year / 5) * 5 AS five_year_bucket,
@@ -12,3 +15,4 @@ WHERE t.production_year >= 1980
 GROUP BY five_year_bucket, k.id, k.keyword
 ORDER BY uses DESC, five_year_bucket, k.id
 LIMIT 100;
+*/

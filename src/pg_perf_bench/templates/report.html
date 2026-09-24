@@ -1986,6 +1986,9 @@
           if (iteration && iteration.parameter) {
             labels.push(`${asText(iteration.parameter)}=${asText(iteration.value)}`);
           }
+          if (block && block.iteration_status && block.iteration_status !== 'completed') {
+            labels.push(`Status: ${asText(block.iteration_status)} (diagnostic only)`);
+          }
           if (block && block.collection_scope) labels.push(asText(block.collection_scope));
           wrapper.append(element('div', 'comparison-label', labels.join(' | ') || 'Benchmark run'));
           if (block && Array.isArray(block.errors) && block.errors.length) {
@@ -2137,6 +2140,10 @@
             == null
             ? null
             : `${metrics.interval_seconds ?? report.benchmark_methodology.system_metrics_interval_seconds}s`,
+        ],
+        [
+          'init_policy',
+          safety.init_policy ?? report.benchmark_methodology?.init_policy ?? 'each-iteration',
         ],
         [
           'reset_mode',

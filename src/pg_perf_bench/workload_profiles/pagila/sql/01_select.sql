@@ -1,5 +1,5 @@
 -- pagila OLTP: short read transactions with point lookups. Random identifiers come from
--- pgbench (\set random) within bounds read once per client, so transaction cost does not
+-- pgbench (\set random) within bounds read once per script, so transaction cost does not
 -- grow with table size. Dates are offsets from 2022-01-01, the start of the generated data.
 -- Table bounds come from pagila.bench_bounds, a one-row table filled by the setup script,
 -- so identifier selection costs one single-row read instead of a scan per table.
@@ -77,13 +77,13 @@ ORDER BY r.rental_date DESC
 LIMIT 20;
 
 -- Overdue rentals of a customer
-SELECT r.rental_id, f.title, r.rental_date, f.rental_duration
+SELECT r.rental_id, f.title, r.rental_date, r.rental_duration
 FROM rental r
 JOIN inventory i ON i.inventory_id = r.inventory_id
 JOIN film f ON f.film_id = i.film_id
 WHERE r.customer_id = :customer_id
-  AND r.return_date IS NULL
-  AND r.rental_date + make_interval(days => f.rental_duration)
+  AND (r.return_date IS NULL OR r.return_date > to_timestamp(:data_start_epoch + :day * 86400))
+  AND r.rental_date + r.rental_duration * INTERVAL '24 hours'
       < to_timestamp(:data_start_epoch + :day * 86400)
 ORDER BY r.rental_date;
 

@@ -2,7 +2,9 @@
 
 The `pagila` OLTP mix plus a store dashboard (`05_reporting.sql`, weight 5 out of
 105). Each reporting transaction selects one store, one category and a period
-of at most 30 days inside the generated rental timeline. All period boundaries
+of at most 30 days covering the generated rental/return/payment timeline and the
+current logical workload day. All generated receipt dates are reachable; the upper
+window bound advances with `benchmark_now()` without rewriting a shared counter. All period boundaries
 and daily groups use UTC, independently of the server's `TimeZone`.
 
 The seven dashboard queries return cashier revenue, category revenue, catalog
@@ -28,6 +30,11 @@ Clients share this mix, so the profile does not reserve a separate analyst pool.
 The seven statements run in a read-only transaction at the connection's isolation
 level; default READ COMMITTED does not promise a single cross-statement snapshot.
 
+The shared [data and time contract](../pagila/README.md#data-and-time-contract)
+defines non-overlapping copy histories, snapshotted rental terms, historical balances
+and one-time collection of late fees. Both profiles require regenerated data after
+this schema change.
+
 Returns look up the open rental by inventory ID using the partial unique index,
 including rentals created during the run. A returned copy can be rented again;
 returns are not restricted to the initial rental ID range. Inventory moves
@@ -40,19 +47,17 @@ old global-reporting results are not measurements of the same workload.
 
 ## Approximate database sizes
 
-Reference footprint on PostgreSQL 18.6 with the corrected generator and indexes,
-before running the workload: scale 50 occupied **517,161,487 bytes** in
-the database, including **190,332,928 bytes of table storage** and **314,695,680
-bytes of indexes**. The remaining approximately 12 MB is database overhead.
-Pagila and Pagila HTAP use the same initial data and indexes, so their initial
-size estimates are the same; the subsequent write workload can change their sizes.
+Reference PostgreSQL 18 footprint for the current model at scale 72 is approximately
+**805 MB per database**, including **296 MB of table storage** and **499 MB of indexes**.
+Pagila and Pagila HTAP share the same initial data and indexes; subsequent writes
+change their sizes. Figures are rounded, and fixed database overhead is not scaled.
 
 | Target database size, including indexes | Approximate `--workload-scale` | Table storage | Index storage | Films |
 | --- | ---: | ---: | ---: | ---: |
-| 1 GB | 100 | 0.38 GB | 0.63 GB | 100,000 |
-| 10 GB | 1000 | 3.8 GB | 6.3 GB | 1,000,000 |
-| 100 GB | 10000 | 38 GB | 63 GB | 10,000,000 |
-| 1 TB | 100000 | 381 GB | 629 GB | 100,000,000 |
+| 1 GB | 90 | 0.37 GB | 0.62 GB | 90,000 |
+| 10 GB | 900 | 3.7 GB | 6.2 GB | 900,000 |
+| 100 GB | 9000 | 37 GB | 62 GB | 9,000,000 |
+| 1 TB | 90000 | 370 GB | 624 GB | 90,000,000 |
 
 Units are decimal: **1 GB = 10^9 bytes; 1 TB = 1000 GB**. Targets and scale
 values are rounded starting points, obtained by extrapolating measured table and

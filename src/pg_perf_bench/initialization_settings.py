@@ -54,6 +54,41 @@ class InitializationSettings:
         self.original = None
         self.changed = False
         self.replicas: Counter[tuple[str, ...]] = Counter()
+        self.recover_only = False
+
+    async def _acquire_lock(self):
+        if not await self.db.fetchval('SELECT pg_try_advisory_lock($1, $2)', *_LOCK):
+            raise ConfigurationError('Another benchmark or initialization holds the server lock')
+        self.lock_acquired = True
+        # Advisory locks are database-local. Acquire first, then inspect all
+        # databases so target-DB/schema runs also exclude postgres/DB-reset runs.
+        # Simultaneous cross-database contenders may both fail, but cannot both
+        # pass: each retains its own lock throughout this check and all mutations.
+        if await self.db.fetchval(
+            "SELECT EXISTS (SELECT FROM pg_catalog.pg_locks WHERE locktype='advisory' "
+            'AND classid=$1::oid AND objid=$2::oid AND objsubid=2 '
+            'AND granted AND pid<>pg_backend_pid())',
+            *_LOCK,
+        ):
+            raise ConfigurationError('Another benchmark or initialization holds the server lock')
+
+    async def assert_held(self):
+        if self.db is None or self.db.is_closed() or not self.lock_acquired:
+            raise ConfigurationError('Benchmark lock connection was lost; refusing to continue')
+        held = await self.db.fetchval(
+            "SELECT EXISTS (SELECT FROM pg_catalog.pg_locks WHERE locktype='advisory' "
+            'AND classid=$1::oid AND objid=$2::oid AND objsubid=2 '
+            'AND granted AND pid=pg_backend_pid()) AND NOT pg_is_in_recovery()',
+            *_LOCK,
+        )
+        if not held:
+            raise ConfigurationError('Benchmark server lock was lost; refusing to continue')
+
+    async def reopen_after_restart(self):
+        # Only the authorized database-reset path may reacquire a lost lock.
+        # Its target database has already been dropped; reacquire before CREATE.
+        await self._disconnect()
+        await self.open(recover_only=self.recover_only)
 
     async def _sync(self):
         if self.connection_type == ConnectionType.MANAGED or self.connection is None:
@@ -158,15 +193,12 @@ class InitializationSettings:
         return any(_STATE_DIR.glob('*.json'))
 
     async def open(self, *, recover_only=False):
+        self.recover_only = recover_only
         await self._connect()
         try:
             if await self.db.fetchval('SELECT pg_is_in_recovery()'):
                 raise ConfigurationError('Fast initialization requires a primary PostgreSQL server')
-            if not await self.db.fetchval('SELECT pg_try_advisory_lock($1, $2)', *_LOCK):
-                raise ConfigurationError(
-                    "Another initialization is changing this primary's settings"
-                )
-            self.lock_acquired = True
+            await self._acquire_lock()
             is_superuser = await self.db.fetchval("SELECT current_setting('is_superuser')::boolean")
             pending_recovery = any(self.state_dir.glob('*.json'))
             if pending_recovery and not is_superuser:
@@ -275,9 +307,7 @@ class InitializationSettings:
         if self.db.is_closed():
             await self._disconnect()
             await self._connect()
-            if not await self.db.fetchval('SELECT pg_try_advisory_lock($1, $2)', *_LOCK):
-                raise RuntimeError('Cannot recover fsync: another initialization holds the lock')
-            self.lock_acquired = True
+            await self._acquire_lock()
         if await self.db.fetchval('SELECT pg_is_in_recovery()') or self._member_identity(
             await self._identity()
         ) != self._member_identity(self.identity):

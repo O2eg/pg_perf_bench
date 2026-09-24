@@ -40,6 +40,7 @@ class Context(BaseContext):
             'workload_command': args.workload_command,
             'allow_database_reset': bool(getattr(args, 'allow_database_reset', False)),
             'drop_os_caches': bool(getattr(args, 'drop_os_caches', False)),
+            'statement_timeout_seconds': getattr(args, 'statement_timeout_seconds', None),
             'command_timeout': float(getattr(args, 'command_timeout', 300.0)),
         }
 

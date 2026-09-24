@@ -34,7 +34,8 @@ and access to `postgres`. Schema reset uses only the selected database and
 requires `--init-fsync keep`, including on self-managed servers.
 
 The loader retains batching, parallel index construction and UNLOGGED→LOGGED.
-`--init-table-mode logged` skips the conversion. The default
+`--init-table-mode logged` ensures tables are LOGGED before loading and skips
+UNLOGGED loading and the post-load conversion. The default
 `--init-synchronous-commit keep` does not change the session commit policy.
 Explicit `--init-synchronous-commit off` removes local WAL flush and synchronous
 replica acknowledgement waits during preparation. `local` keeps local WAL flush
@@ -80,7 +81,9 @@ skips those probes. If the provider cannot enable cleanup, use the default proto
 Opaque custom scripts with an `unknown` protocol retain the prepared probes;
 see [custom protocol declarations](workload_description.md#pgbench-protocol).
 The probes check common incompatibilities; they do not identify every pooler's mode.
-No workload SQL runs until initialization and the physical replay barrier finish.
+When an iteration initializes data, workload starts only after initialization and
+the physical replay barrier finish. With `--init-policy skip` or reused `once`
+points, neither initialization nor that replay barrier runs.
 
 For configurable Odyssey, the corresponding route uses `pool "session"` and
 `pool_rollback yes`. See the Odyssey
@@ -91,6 +94,14 @@ it explicitly releases advisory locks. Diagnostic connections clear read-only
 mode and timeouts before returning to the pool. Managed service/loader connections
 disable asyncpg's named statement cache to avoid collisions between repeated CLI
 processes when pool cleanup is unavailable. This does not set pgbench's protocol.
+
+Every benchmark controller holds a session advisory lock and checks for conflicting
+locks across the server's databases before changing data or settings. Schema reset
+and `--init-policy skip` need access only to the target DB; full database reset
+uses `postgres`. Allow the controller session to remain open and idle throughout
+a reused-data sweep, otherwise the next lock check stops the run. Different
+benchmark databases on the same primary are excluded too; use separate servers
+for parallel comparisons. See [reset protection](../README.md#concurrent-runs-and-reset-protection).
 
 ### MDB connection limits
 
@@ -138,8 +149,12 @@ CLI exit code **5**; inspect `collection_summary` and individual reasons. Host
 diagnostics are marked unsupported. Reset, initialization, replay-barrier and
 workload failures still abort the benchmark.
 
-The final dataset remains for inspection. A repeated command resets the profile
-schemas and reloads data before each iteration. Use a dedicated database without
+The final dataset remains for inspection. By default (`--init-policy each-iteration`),
+a repeated schema-mode command resets the profile schemas and reloads data before
+each iteration. Use `--init-policy once` to prepare only the first point, or
+`--init-policy skip` to reuse the existing dataset without reset/load/vacuum.
+With `skip`, omit `--allow-database-reset` and loader options; ensure the retained
+dataset is suitable and replicas are caught up before starting. Use a dedicated database without
 application dependencies: `DROP SCHEMA ... CASCADE` can remove dependent objects
 in other schemas. Schema reset is not a sandbox for arbitrary custom profile SQL.
 

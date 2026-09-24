@@ -8,6 +8,7 @@ from pg_perf_bench.benchmark import BenchmarkRunner
 from pg_perf_bench.executors import ProcessResult
 from pg_perf_bench.report.commands import fill_info_report
 from pg_perf_bench.storage import build_storage_section, collect_storage_snapshot, vacuum_analyze
+from tests.guard_helpers import mock_guard
 
 
 def test_workload_boundaries_include_vacuum_and_preserve_each_iteration():
@@ -31,13 +32,14 @@ def test_workload_boundaries_include_vacuum_and_preserve_each_iteration():
         events.append('snapshot')
         return {'sequence': len(events)}
 
-    async def reset(*args):
+    async def reset(*args, **kwargs):
         events.append('reset')
 
     with (
         patch('pg_perf_bench.benchmark.run_command_result', side_effect=command),
         patch('pg_perf_bench.benchmark.vacuum_analyze', side_effect=vacuum),
         patch('pg_perf_bench.benchmark.collect_storage_snapshot', side_effect=snapshot),
+        patch('pg_perf_bench.benchmark.InitializationSettings', side_effect=mock_guard),
         patch.object(BenchmarkRunner, 'reset_db_environment', side_effect=reset),
     ):
         runs = asyncio.run(

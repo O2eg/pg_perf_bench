@@ -437,6 +437,20 @@ def build_initialization_section(benchmark_runs, options):
     for run in benchmark_runs:
         evidence = run.get('initialization')
         if evidence is None:
+            if run.get('initialization_performed') is False:
+                index = run['iteration']['index']
+                source = (
+                    'dataset prepared before this run'
+                    if run.get('init_policy') == 'skip'
+                    else 'dataset initialized in iteration 1'
+                )
+                reports[f'iteration_{index}_reuse'] = {
+                    'header': f'Iteration {index}: initialization skipped',
+                    'item_type': 'plain_text',
+                    'state': 'expanded',
+                    'data': f'Reusing {source}. No reset, loading or VACUUM ANALYZE. '
+                    'Cache state and previous workload changes are retained.',
+                }
             continue
         index = run['iteration']['index']
         groups = {}

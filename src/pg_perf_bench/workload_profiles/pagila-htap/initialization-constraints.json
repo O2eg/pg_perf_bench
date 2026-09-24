@@ -344,8 +344,55 @@
       "payment_p2022_04_pkey",
       "payment_p2022_05_pkey",
       "payment_p2022_06_pkey",
-      "payment_p2022_07_pkey"
+      "payment_p2022_07_pkey",
+      "payment_future_pkey"
     ],
     "sql": "DO $$ BEGIN IF current_setting('server_version_num')::integer >= 110000 THEN ALTER TABLE pagila.payment ADD CONSTRAINT payment_pkey PRIMARY KEY (payment_date, payment_id); END IF; END $$;"
+  },
+  {
+    "name": "payment_future_pkey",
+    "sql": "ALTER TABLE pagila.payment_future ADD CONSTRAINT payment_future_pkey PRIMARY KEY USING INDEX payment_future_pkey"
+  },
+  {
+    "name": "payment_p2022_07_customer_id_fkey",
+    "sql": "ALTER TABLE ONLY pagila.payment_p2022_07\n    ADD CONSTRAINT payment_p2022_07_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES pagila.customer(customer_id);",
+    "depends_on": [
+      "customer_pkey"
+    ]
+  },
+  {
+    "name": "payment_p2022_07_rental_id_fkey",
+    "sql": "ALTER TABLE ONLY pagila.payment_p2022_07\n    ADD CONSTRAINT payment_p2022_07_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES pagila.rental(rental_id);",
+    "depends_on": [
+      "rental_pkey"
+    ]
+  },
+  {
+    "name": "payment_p2022_07_staff_id_fkey",
+    "sql": "ALTER TABLE ONLY pagila.payment_p2022_07\n    ADD CONSTRAINT payment_p2022_07_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES pagila.staff(staff_id);",
+    "depends_on": [
+      "staff_pkey"
+    ]
+  },
+  {
+    "name": "payment_future_customer_id_fkey",
+    "sql": "ALTER TABLE ONLY pagila.payment_future\n    ADD CONSTRAINT payment_future_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES pagila.customer(customer_id);",
+    "depends_on": [
+      "customer_pkey"
+    ]
+  },
+  {
+    "name": "payment_future_rental_id_fkey",
+    "sql": "ALTER TABLE ONLY pagila.payment_future\n    ADD CONSTRAINT payment_future_rental_id_fkey FOREIGN KEY (rental_id) REFERENCES pagila.rental(rental_id);",
+    "depends_on": [
+      "rental_pkey"
+    ]
+  },
+  {
+    "name": "payment_future_staff_id_fkey",
+    "sql": "ALTER TABLE ONLY pagila.payment_future\n    ADD CONSTRAINT payment_future_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES pagila.staff(staff_id);",
+    "depends_on": [
+      "staff_pkey"
+    ]
   }
 ]

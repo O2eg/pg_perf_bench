@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from pg_perf_bench.benchmark import BenchmarkRunner
 from pg_perf_bench.executors import ProcessResult
 from pg_perf_bench.report.commands import benchmark_result, chart_tps
+from tests.guard_helpers import mock_guard
 
 
 def _result(command, stdout='', stderr='', returncode=0):
@@ -63,6 +64,7 @@ tps = 80.75 (without initial connection time)
 def test_iteration_evidence_identifies_axis_value():
     async def scenario():
         with (
+            patch('pg_perf_bench.benchmark.InitializationSettings', side_effect=mock_guard),
             patch.object(
                 BenchmarkRunner,
                 'reset_db_environment',
@@ -167,3 +169,128 @@ def test_environment_identity_ignores_instantaneous_lshw_cpu_clock():
     assert first['identity_hash'] == second['identity_hash']
     assert first['dimensions']['cpu']['items'] == ['cpu_info']
     assert first['dimensions']['network_hardware']['items'] == ['lshw_network']
+
+
+def test_failed_second_iteration_preserves_completed_result_and_redacts_error(tmp_path):
+    import json
+
+    import pytest
+
+    from pg_perf_bench.errors import CommandExecutionError, CommandFailure
+
+    secret = 'quote"secret'
+    failure = CommandExecutionError(
+        CommandFailure(
+            'pgbench',
+            1,
+            'partial output',
+            'canceling statement due to statement timeout ' + secret,
+            2.0,
+        )
+    )
+    config = {
+        'pgbench_iter_name': 'pgbench_clients',
+        'pgbench_iter_list': [1, 4],
+        'checkpoint_path': str(tmp_path / 'run.progress.json'),
+        'statement_timeout_seconds': None,
+    }
+
+    async def run():
+        with (
+            patch('pg_perf_bench.benchmark.InitializationSettings', side_effect=mock_guard),
+            patch.object(BenchmarkRunner, 'reset_db_environment', AsyncMock()),
+            patch.object(
+                BenchmarkRunner,
+                'run_benchmark_with_evidence',
+                AsyncMock(side_effect=[{'metrics': {'tps': 7.0}}, failure]),
+            ),
+        ):
+            await BenchmarkRunner.run_benchmark_iterations(
+                MagicMock(),
+                [['init', 'run'], ['init', 'run']],
+                'local',
+                MagicMock(),
+                {'password': secret},
+                config,
+            )
+
+    with pytest.raises(CommandExecutionError):
+        asyncio.run(run())
+    progress = json.loads((tmp_path / 'run.progress.json').read_text())
+    assert progress['status'] == 'failed'
+    assert progress['completed_iterations'] == 1
+    assert progress['benchmark_runs'][0]['metrics']['tps'] == 7
+    assert progress['statement_timeout_messages'] == 1
+    assert secret not in str(progress)
+    assert progress['failed_command']['stdout'] == 'partial output'
+
+
+def test_statement_timeout_is_only_applied_to_workload_not_initialization(monkeypatch, tmp_path):
+    import shlex
+    from pathlib import Path
+
+    script = tmp_path / 'query.sql'
+    script.write_text('SELECT 1;')
+    monkeypatch.delenv('PGOPTIONS', raising=False)
+    observed = []
+
+    async def command_result(logger, command, **kwargs):
+        assert 'statement_timeout' not in kwargs['env'].get('PGOPTIONS', '')
+        if command != 'init':
+            args = shlex.split(command)
+            staged = Path(args[args.index('-f') + 1]).read_text()
+            observed.append(staged)
+        return _result(command, stdout='tps = 1.0')
+
+    async def run():
+        with (
+            patch('pg_perf_bench.benchmark.run_command_result', command_result),
+            patch('pg_perf_bench.benchmark.vacuum_analyze', AsyncMock()),
+            patch('pg_perf_bench.benchmark.collect_storage_snapshot', AsyncMock(return_value={})),
+        ):
+            result = await BenchmarkRunner.run_benchmark_with_evidence(
+                MagicMock(),
+                ['init', f'pgbench -f {script}'],
+                db_conf={},
+                command_timeout=300,
+                statement_timeout_seconds=0.001,
+            )
+            assert result['statement_timeout_transport'] == 'sql-script'
+
+    asyncio.run(run())
+    assert len(observed) == 1
+    assert observed[0].startswith('SET statement_timeout=1;')
+    assert script.read_text() == 'SELECT 1;'
+
+
+def test_aborted_pgbench_with_zero_exit_code_is_not_success():
+    import pytest
+
+    from pg_perf_bench.errors import CommandExecutionError
+
+    commands = AsyncMock(
+        side_effect=[
+            _result('init'),
+            _result(
+                'run',
+                stdout='tps = 1.0',
+                stderr=(
+                    'pgbench: error: client 0 aborted: ERROR: '
+                    'canceling statement due to statement timeout'
+                ),
+            ),
+        ]
+    )
+
+    async def run():
+        with (
+            patch('pg_perf_bench.benchmark.run_command_result', commands),
+            patch('pg_perf_bench.benchmark.vacuum_analyze', AsyncMock()),
+            patch('pg_perf_bench.benchmark.collect_storage_snapshot', AsyncMock(return_value={})),
+        ):
+            await BenchmarkRunner.run_benchmark_with_evidence(
+                MagicMock(), ['init', 'run'], db_conf={}, command_timeout=300
+            )
+
+    with pytest.raises(CommandExecutionError, match='statement timeout'):
+        asyncio.run(run())

@@ -1,6 +1,7 @@
 """Opt-in semantic checks on an initialized disposable IMDb database."""
 
 import asyncio
+import json
 import os
 import re
 import subprocess
@@ -20,6 +21,10 @@ pytestmark = [
     ),
 ]
 ROOT = Path(os.environ.get('IMDB_PROFILE_PATH', str(WORKLOAD_PROFILES_PATH / 'imdb')))
+
+
+def planner_source(stem):
+    return '\n'.join(p.read_text() for p in sorted((ROOT / 'sql/planner').glob(stem + '_*.sql')))
 
 
 async def connect():
@@ -198,9 +203,9 @@ def test_company_average_is_per_title_not_per_company_credit():
 @pytest.mark.parametrize('protocol', ['simple', 'prepared'])
 def test_all_pgbench_scripts(protocol):
     # Every script is explicitly executed; random script selection cannot hide a broken one.
-    for script in sorted((ROOT / 'sql').glob('*.sql')):
-        if not re.match(r'(?:0[1-5]_|select_\d+\.sql)', script.name):
-            continue
+    manifest = json.loads((ROOT / 'profile.json').read_text())
+    for name in manifest['files']['queries']:
+        script = ROOT / name
         result = subprocess.run(
             [
                 '/usr/bin/pgbench',
@@ -212,7 +217,7 @@ def test_all_pgbench_scripts(protocol):
                 '-j',
                 '1',
                 '-t',
-                '1',
+                '6' if protocol == 'prepared' else '1',
                 '-f',
                 str(script),
             ],
@@ -227,7 +232,7 @@ def test_all_pgbench_scripts(protocol):
 
 def test_budget_and_votes_are_numeric_minima():
     async def run(c):
-        source = (ROOT / 'sql/select_18.sql').read_text()
+        source = planner_source('select_18')
         query = next(q.strip() for q in source.split(';') if q.lstrip().startswith('SELECT'))
         row = await c.fetchrow(query)
         raw = await c.fetch("""SELECT mi.info AS budget, v.info AS votes
@@ -245,7 +250,7 @@ def test_budget_and_votes_are_numeric_minima():
 
 def test_producer_query_uses_person_without_requiring_a_character():
     async def run(c):
-        source = (ROOT / 'sql/select_10.sql').read_text()
+        source = planner_source('select_10')
         queries = [q.strip() for q in source.split(';') if q.lstrip().startswith('SELECT')]
         row = await c.fetchrow(queries[2])
         credits = await c.fetch("""SELECT DISTINCT n.name,t.title
@@ -257,5 +262,145 @@ def test_producer_query_uses_person_without_requiring_a_character():
         assert credits
         assert row['producer'] == min(r['name'] for r in credits)
         assert row['movie_with_american_producer'] == min(r['title'] for r in credits)
+
+    check_async(run)
+
+
+def application_variants(source, bounds=None):
+    if r'\gset bounds_' in source:
+        match = re.search(
+            r'SELECT min\(id\) AS lo, max\(id\) AS hi FROM (\w+)\n\\gset bounds_', source
+        )
+        assert match is not None and bounds is not None
+        low, high = bounds[match[1]]
+        source = source[: match.start()] + source[match.end() :]
+        source = source.replace(':bounds_lo', str(low)).replace(':bounds_hi', str(high))
+    matches = re.findall(r'\\set (\w+) random\((\d+),\s*(\d+)\)', source)
+    sql = '\n'.join(line for line in source.splitlines() if not line.startswith('\\set'))
+    sql = sql.split(';', 1)[1].strip().rstrip(';')
+    if not matches:
+        yield {}, sql
+    else:
+        assert len(matches) == 1
+        name, low, high = matches[0]
+        low, high = int(low), int(high)
+        values = range(low, high + 1) if high - low < 100 else (low, (low + high) // 2, high)
+        for value in values:
+            yield {name: value}, re.sub(r'(?<!:):(\w+)', lambda m, value=value: str(value), sql)
+
+
+def test_every_application_scenario_returns_useful_data():
+    async def run(c):
+        profile = json.loads((ROOT / 'profile.json').read_text())
+        bounds = {
+            table: tuple(await c.fetchrow(f'SELECT min(id),max(id) FROM {table}'))
+            for table in ('title', 'cast_info')
+        }
+        for filename in profile['files']['queries']:
+            for parameters, sql in application_variants((ROOT / filename).read_text(), bounds):
+                rows = await c.fetch(sql)
+                assert rows and any(v is not None for row in rows for v in row.values()), (
+                    filename,
+                    parameters,
+                )
+
+    check_async(run)
+
+
+def test_generator_matches_catalog_predicates_in_scaled_background():
+    async def run(c):
+        assert await c.fetchval("SELECT count(*) FROM name WHERE id>8 AND name LIKE '%Tim%'") > 1
+        assert await c.fetchval("""SELECT EXISTS(SELECT FROM movie_companies mc
+            JOIN title t ON t.id=mc.movie_id JOIN movie_info mi ON mi.movie_id=t.id
+            WHERE mc.company_type_id=1 AND mc.note LIKE '%(VHS)%'
+            AND mc.note LIKE '%(1994)%' AND mc.note LIKE '%(USA)%'
+            AND t.production_year BETWEEN 1990 AND 1994
+            AND mi.info_type_id=7 AND mi.info='USA')""")
+        assert (
+            await c.fetchval(
+                'SELECT info::numeric FROM movie_info_idx WHERE movie_id=7 AND info_type_id=3'
+            )
+            >= 6
+        )
+        assert await c.fetchval("""SELECT EXISTS(SELECT FROM movie_link
+            WHERE movie_id=21 AND linked_movie_id=19 AND link_type_id=1)""")
+        for predicate, keyword in [("t.title LIKE 'Murder%'", 13), ("t.title LIKE 'Money%'", 2)]:
+            assert (
+                await c.fetchval(f'SELECT count(*) FROM title t WHERE t.id>22 AND {predicate}') > 1
+            )
+            assert not await c.fetchval(f"""SELECT EXISTS(SELECT FROM title t
+                WHERE t.id>22 AND {predicate} AND NOT EXISTS(SELECT FROM movie_keyword mk
+                WHERE mk.movie_id=t.id AND mk.keyword_id={keyword}))""")
+        for role in (1, 3):
+            predicate = 'role_id IN (1,2)' if role == 1 else 'role_id=3'
+            assert not await c.fetchval(f"""SELECT EXISTS(SELECT FROM title t WHERE NOT EXISTS
+                (SELECT FROM cast_info ci WHERE ci.movie_id=t.id AND {predicate}))""")
+        assert not await c.fetchval("""SELECT EXISTS(SELECT FROM title t WHERE NOT EXISTS
+            (SELECT FROM movie_companies mc WHERE mc.movie_id=t.id AND mc.company_type_id=1))""")
+        assert not await c.fetchval("""SELECT EXISTS(SELECT FROM cast_info ci JOIN name n
+            ON n.id=ci.person_id WHERE (ci.role_id=1 AND n.gender<>'m')
+            OR (ci.role_id=2 AND n.gender<>'f'))""")
+        if await c.fetchval('SELECT count(*) FROM title') >= 30000:
+            for filename in ('09_vhs_archive.sql', '11_movie_links.sql'):
+                _, sql = next(application_variants((ROOT / 'sql' / filename).read_text()))
+                rows = await c.fetch(sql)
+                assert any(row['id'] > 22 for row in rows), filename
+
+    check_async(run)
+
+
+def test_exists_rewrites_preserve_original_planner_results():
+    reference = json.loads(
+        (Path(__file__).parents[1] / 'fixtures/imdb_planner_reference.json').read_text()
+    )
+
+    async def run(c):
+        for filename, old_sql in reference.items():
+            new_sql = (
+                (ROOT / 'sql/planner' / filename).read_text().split(';', 1)[1].strip().rstrip(';')
+            )
+            assert await c.fetch(new_sql) == await c.fetch(old_sql), filename
+
+    check_async(run)
+
+
+def test_sampled_id_domains_are_dense():
+    async def run(c):
+        for table in ('title', 'cast_info'):
+            n, lo, hi = await c.fetchrow(f'SELECT count(*), min(id), max(id) FROM {table}')
+            assert n > 0 and n == hi - lo + 1, table
+
+    check_async(run)
+
+
+def test_release_events_have_independent_calendar_dates():
+    async def run(c):
+        assert not await c.fetchval("""SELECT EXISTS(SELECT FROM movie_companies
+            WHERE note LIKE '%(VHS)%' AND note LIKE '%(Blu-ray)%')""")
+        assert not await c.fetchval("""SELECT EXISTS(SELECT FROM movie_companies mc
+            JOIN title t ON t.id=mc.movie_id WHERE mc.note IS NOT NULL AND (
+              substring(mc.note FROM '[(]([12][0-9]{3})[)]') IS NULL OR
+              substring(mc.note FROM '[(]([12][0-9]{3})[)]')::int<t.production_year OR
+              substring(mc.note FROM '[(]([12][0-9]{3})[)]')::int>2024 OR
+              (mc.note LIKE '%(VHS)%' AND substring(mc.note FROM
+                 '[(]([12][0-9]{3})[)]')::int NOT BETWEEN 1980 AND 2005) OR
+              (mc.note LIKE '%(Blu-ray)%' AND substring(mc.note FROM
+                 '[(]([12][0-9]{3})[)]')::int<2006)))""")
+        assert not await c.fetchval("""SELECT EXISTS(SELECT FROM movie_companies mc
+            WHERE mc.note IS NOT NULL AND (SELECT count(*) FROM regexp_matches(
+                mc.note,'[(]([12][0-9]{3})[)]','g'))<>1)""")
+        for year in range(1990, 1995):
+            assert await c.fetchval(
+                """SELECT EXISTS(SELECT FROM title t
+                JOIN movie_companies mc ON mc.movie_id=t.id
+                WHERE t.id>22 AND t.production_year=$1 AND mc.company_type_id=1
+                AND mc.note='(VHS) (USA) (1994)' AND EXISTS(SELECT FROM movie_info mi
+                    WHERE mi.movie_id=t.id AND mi.info_type_id=7 AND mi.info='USA'))""",
+                year,
+            )
+        _, sql = next(application_variants((ROOT / 'sql/09_vhs_archive.sql').read_text()))
+        rows = await c.fetch(sql)
+        assert any(row['production_year'] < 1994 for row in rows)
+        assert all(row['vhs_release_year'] == 1994 for row in rows)
 
     check_async(run)

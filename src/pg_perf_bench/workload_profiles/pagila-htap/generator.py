@@ -14,6 +14,12 @@ def scaled(base: int, scale: float, minimum: int) -> int:
     return max(minimum, round(base * scale))
 
 
+def coprime_step(size: int, preferred: int) -> int:
+    while math.gcd(size, preferred) != 1:
+        preferred += 1
+    return preferred
+
+
 def build_load_plan(scale: float) -> LoadPlan:
     if not math.isfinite(scale) or scale <= 0:
         raise ValueError('scale must be a finite number greater than zero')
@@ -30,6 +36,28 @@ def build_load_plan(scale: float) -> LoadPlan:
     payments = scaled(16_500, scale, rentals)
     categories = 16
     languages = 6
+    city_step = coprime_step(cities, 53)
+    store_step = coprime_step(stores, 17)
+    actor_step = coprime_step(actors, 37)
+    copy_step = coprime_step(inventory, 977)
+    rounds = (rentals + inventory - 1) // inventory
+    # Each copy has its own starting phase; subsequent rentals start nine days
+    # apart, longer than every generated (one to eight day) rental.
+    phase_seconds = (181 - (rounds - 1) * 9 - 8) * 86400
+
+    def rental_expressions(key):
+        copy = f'(1 + (({key} - 1) * {copy_step}) % {inventory})'
+        film = f'(1 + floor(power(det_uniform({copy}, 3), 1.35) * {films})::bigint)'
+        date = (
+            f"(TIMESTAMPTZ '2022-01-01 00:00:00+00' + "
+            f'(floor(det_uniform({copy}, 7) * {phase_seconds}) + '
+            f"(({key} - 1) / {inventory}) * 9 * 86400) * INTERVAL '1 second')"
+        )
+        rate = f'round((0.99 + power(det_uniform({film}, 1), 1.8) * 5)::numeric, 2)'
+        return copy, film, date, rate
+
+    rental_copy, rental_film, rental_date, rental_rate = rental_expressions('g')
+    pay_copy, pay_film, pay_date, pay_rate = rental_expressions('rental_id')
 
     data = (
         LoadTask(
@@ -84,7 +112,7 @@ INSERT INTO address (address_id, address, address2, district, city_id, postal_co
             (10 + (g * 17) % 9999) || ' Synthetic Street',
             CASE WHEN g % 9 = 0 THEN 'Suite ' || (g % 200) ELSE NULL END,
             'District ' || (1 + g % 80),
-            1 + ((g * 53 - 1) % {cities}),
+            1 + ((g * {city_step} - 1) % {cities}),
             lpad(((g * 7919) % 100000)::text, 5, '0'),
             '+1-' || lpad(((g * 104729) % 10000000000)::text, 10, '0')
         FROM generate_series($1::bigint, $2::bigint) AS g;
@@ -126,7 +154,7 @@ INSERT INTO customer
             (customer_id, store_id, first_name, last_name, email, address_id, activebool,
             create_date, active)
         SELECT g,
-            1 + ((g * 17 - 1) % {stores}),
+            1 + ((g * {store_step} - 1) % {stores}),
             'Customer' || g,
             'Family' || (1 + (g * 31) % 500),
             CASE WHEN g % 20 = 0 THEN NULL ELSE 'customer' || g || '@example.test' END,
@@ -186,7 +214,7 @@ INSERT INTO film_category (film_id, category_id)
             'film_actor',
             f"""
 INSERT INTO film_actor (film_id, actor_id)
-        SELECT film_id, 1 + ((film_id * 19 + actor_offset * 37 - 1) % {actors})
+        SELECT film_id, 1 + ((film_id * 19 + actor_offset * {actor_step} - 1) % {actors})
         FROM generate_series($1::bigint, $2::bigint) AS film_id
         CROSS JOIN LATERAL generate_series(1, 3 + (film_id % 5)) AS actor_offset;
         """,
@@ -209,22 +237,14 @@ INSERT INTO inventory (inventory_id, film_id, store_id)
         LoadTask(
             'rental',
             f"""
-INSERT INTO rental (rental_id, rental_date, inventory_id, customer_id, return_date, staff_id)
-        SELECT g,
-            rental_date,
-            inventory_id,
-            customer_id,
-            rental_date + (1 + g % 8) * INTERVAL '1 day',
-            1 + ((inventory_id - 1) % {stores})
-        FROM (
-            SELECT
-                g,
-                TIMESTAMPTZ '2022-01-01 00:00:00+00'
-                    + ((g * 977) % (181 * 86400)) * INTERVAL '1 second' AS rental_date,
-                1 + floor(power(det_uniform(g, 4), 1.25) * {inventory})::bigint AS inventory_id,
-                1 + floor(power(det_uniform(g, 5), 1.8) * {customers})::bigint AS customer_id
-            FROM generate_series($1::bigint, $2::bigint) AS g
-        ) AS generated;
+INSERT INTO rental (rental_id, rental_date, inventory_id, customer_id, return_date,
+                    staff_id, rental_rate, rental_duration)
+        SELECT g, {rental_date}, {rental_copy},
+            1 + floor(power(det_uniform(g, 5), 1.8) * {customers})::bigint,
+            {rental_date} + (1 + g % 8) * INTERVAL '24 hours',
+            1 + (({rental_copy} - 1) % {stores}),
+            {rental_rate}, 2 + ({rental_film} % 7)
+        FROM generate_series($1::bigint, $2::bigint) AS g;
         """,
             count=rentals,
             depends_on=('inventory', 'customer', 'staff'),
@@ -233,26 +253,20 @@ INSERT INTO rental (rental_id, rental_date, inventory_id, customer_id, return_da
             'payment',
             f"""
 WITH payment_keys AS (
-                    SELECT g AS payment_id, 1 + ((g - 1) % {rentals}) AS rental_id
-                    FROM generate_series($1::bigint, $2::bigint) AS g
-                ), rentals_generated AS (
-                    SELECT payment_id, rental_id,
-                        1 + floor(power(det_uniform(rental_id, 5),
-            1.8) * {customers})::bigint AS customer_id,
-                        1 + (floor(power(det_uniform(rental_id, 4),
-            1.25) * {inventory})::bigint % {stores}) AS staff_id,
-                        TIMESTAMPTZ '2022-01-01 00:00:00+00'
-                            + ((rental_id * 977) % (181 * 86400)) * INTERVAL '1 second' AS
-            rental_date
-                    FROM payment_keys
-                )
-                INSERT INTO payment (payment_id, customer_id, staff_id, rental_id, amount,
-            payment_date)
-                SELECT payment_id, customer_id, staff_id, rental_id,
-                    round((0.99 + power(det_uniform(payment_id, 6), 2.2) * 12)::numeric, 2),
-                    rental_date + (1 + payment_id % 72) * INTERVAL '1 hour'
-                        + (payment_id / {rentals}) * INTERVAL '1 microsecond'
-                FROM rentals_generated;
+    SELECT g AS payment_id, 1 + ((g - 1) % {rentals}) AS rental_id
+    FROM generate_series($1::bigint, $2::bigint) AS g
+)
+INSERT INTO payment (payment_id, customer_id, staff_id, rental_id, amount, payment_date)
+SELECT payment_id,
+    1 + floor(power(det_uniform(rental_id, 5), 1.8) * {customers})::bigint,
+    1 + (({pay_copy} - 1) % {stores}), rental_id,
+    CASE WHEN rental_id <= {payments - rentals}
+         THEN CASE WHEN payment_id <= {rentals} THEN trunc({pay_rate} / 2, 2)
+                   ELSE {pay_rate} - trunc({pay_rate} / 2, 2) END
+         ELSE {pay_rate} END,
+    {pay_date} + (1 + rental_id % 24) * INTERVAL '1 hour'
+        + ((payment_id - 1) / {rentals}) * INTERVAL '24 hours'
+FROM payment_keys;
         """,
             count=payments,
             depends_on=('rental', 'customer', 'staff'),

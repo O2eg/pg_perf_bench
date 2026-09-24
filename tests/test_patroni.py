@@ -327,6 +327,7 @@ def test_reset_restarts_patroni_without_pg_ctl_or_container_stop(transport):
                 MagicMock(),
                 {},
                 WORKLOAD,
+                reset_guard=MagicMock(assert_held=AsyncMock(), reopen_after_restart=AsyncMock()),
             )
         )
     assert [call.args[2] for call in api.await_args_list] == ['detect', 'restart', 'detect']
@@ -353,6 +354,7 @@ def test_unsupported_options_fail_before_database_mutation(option):
                 MagicMock(),
                 {},
                 {**WORKLOAD, option: True},
+                reset_guard=MagicMock(assert_held=AsyncMock(), reopen_after_restart=AsyncMock()),
             )
         )
     db.drop_db.assert_not_awaited()
@@ -373,6 +375,7 @@ def test_sql_target_mismatch_aborts_before_dropping_database():
                 MagicMock(),
                 {},
                 WORKLOAD,
+                reset_guard=MagicMock(assert_held=AsyncMock(), reopen_after_restart=AsyncMock()),
             )
         )
     assert api.await_count == 1
@@ -397,6 +400,7 @@ def test_restart_failure_never_falls_back_or_initializes_database(failure):
                 MagicMock(),
                 {},
                 WORKLOAD,
+                reset_guard=MagicMock(assert_held=AsyncMock(), reopen_after_restart=AsyncMock()),
             )
         )
     lifecycle.start_db.assert_not_awaited()
@@ -428,6 +432,7 @@ def test_plain_postgres_preserves_stop_sync_start_order():
                 MagicMock(),
                 {},
                 {**WORKLOAD, 'drop_os_caches': True},
+                reset_guard=MagicMock(assert_held=AsyncMock(), reopen_after_restart=AsyncMock()),
             )
         )
     assert events == ['start_db', 'stop_db', 'sync', 'drop_caches', 'start_db']

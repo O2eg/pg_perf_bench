@@ -10,9 +10,10 @@ selects it. Arbitrary old commands remain supported without SQL rewriting.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
+| `--init-policy` | `each-iteration` | Reset/load every iteration, only the first (`once`), or use existing data (`skip`) |
 | `--init-workers` | `4` | Maximum simultaneous data or index jobs; each owns its connection |
 | `--init-batch-rows` | `100000` | Target rows per committed data batch |
-| `--init-table-mode` | `unlogged` | Stored tables become UNLOGGED before data, then LOGGED afterward; `logged` skips conversion |
+| `--init-table-mode` | `unlogged` | `unlogged`: SET UNLOGGED before loading, SET LOGGED afterward; `logged`: SET LOGGED before loading, no post-load conversion |
 | `--init-fsync` | `off` | Temporarily disable fsync on the selected primary; `keep` preserves it |
 | `--init-synchronous-commit` | `keep` | Preserve the session commit policy; explicit `off` or `local` opts into faster loading |
 
@@ -31,7 +32,7 @@ be added to elapsed stage times. DDL and maintenance details are collapsed and
 do not display artificial zero row counters. A task targeting a partitioned
 parent can populate several partitions without separate partition-level jobs.
 
-Before each iteration, `--reset-mode database` (default) recreates the disposable
+When initialization is scheduled, `--reset-mode database` (default) recreates the disposable
 database. `--reset-mode schema` resets the schemas in `LoadPlan.schemas` inside
 a pre-created dedicated database; it requires fast initialization and `--init-fsync keep`.
 It uses the target database for version checks, the controller connection, reset,
@@ -42,10 +43,36 @@ an optional `--managed-pg-info FILE` embeds provider metadata and also implies t
 Schema reset checks CREATE privilege, schema ownership, read-write status and
 UNLOGGED/LOGGED conversion before deleting existing schemas. It refuses `public`,
 system schemas and system databases. A session advisory lock is held through the
-workload to prevent another schema-mode run from resetting the same database.
+workload. A cross-database lock check also rejects a competing full database reset,
+whose controller is connected to `postgres`.
 Direct connections and compatible session pooling are supported; transaction/statement pooling
 are not. See the [pool requirements](doc/managed_mode_usage.md#connection-pooling). Reset does not alter database ownership, ACLs or permanent role settings.
 Use a dedicated database: CASCADE also removes objects depending on the profile schemas.
+
+`--init-policy each-iteration` preserves the default behavior. `once` runs the
+following preparation only before the first point. `skip` runs no preparation,
+including no initialization command or vacuum/analyze, and does not require
+`--allow-database-reset`. It ignores loader settings and the reset scope, rejects
+custom initialization commands/server configurations/cache dropping, and uses the
+target database for the controller and version check. Pending fsync recovery must
+be resolved before `skip`; it never silently restores server settings.
+
+The `once` and `skip` policies retain a controller advisory lock across the
+client sweep and release it on completion, failure or cancellation. The controller
+uses the target database for schema reset/skip, or `postgres` for database reset.
+All modes check the lock key across the connected server's databases before any
+reset or custom configuration write; this also covers legacy initialization.
+Different databases on the same server cannot run overlapping measurements.
+After a planned full-reset restart, the lock must be reacquired before creating
+the target database. Unexpected connection loss does not trigger automatic resume.
+See [concurrent runs and reset protection](README.md#concurrent-runs-and-reset-protection)
+for connection requirements and limits.
+
+Reused points inherit cache state and any workload writes from earlier points. Initialization policy and
+per-point initialization status are recorded in reports. For the structural
+checks and their limits, see [initialization policies](README.md#bundled-workload-profiles).
+`--drop-os-caches` requires `each-iteration`; `once` may apply a custom server
+configuration only as part of its first database reset.
 
 Order for each fresh dataset:
 
@@ -65,8 +92,9 @@ Order for each fresh dataset:
 host command, and replica wait. It does not bound the sum of all data batches.
 For large datasets, increase it to cover the longest table rewrite/index build
 and the time replicas need to catch up. A timeout or failed phase aborts the run
-before pgbench. Failed batches are not automatically retried; the next run
-resets the database or profile schemas according to `--reset-mode`.
+before pgbench. Failed batches are not automatically retried; the next initializing run
+resets the database or profile schemas according to `--reset-mode`. Do not use
+`skip` on a partially initialized dataset.
 
 The common loader sets `search_path` from `LoadPlan.schemas` through SQL after
 opening each asyncpg connection. Explicit loader commit overrides are applied and

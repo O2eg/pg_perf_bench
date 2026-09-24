@@ -144,9 +144,12 @@ def test_profile_supplies_commands_and_report_evidence_embeds_all_sources():
     assert '[generator] generator.py' in init_item['data']
     assert '[schema] sql/imdb-schema.sql' in init_item['data']
     assert '[setup] sql/imdb-fkindexes.sql' in init_item['data']
-    assert '[query] sql/05_join_stress.sql' in query_item['data']
-    assert '[query] sql/select_33.sql' in query_item['data']
-    assert len(evidence['files']) == 38 + 8  # queries, legacy assets, common-loader assets
+    assert '[query] sql/05_movie_details.sql' in query_item['data']
+    assert '[query] sql/planner/' not in query_item['data']
+    assert sum(source['role'] == 'query' for source in evidence['files']) == 11
+    assert sum(source['role'] == 'disabled_queries' for source in evidence['files']) == 3
+    assert sum(source['role'] == 'planner_queries' for source in evidence['files']) == 118
+    assert len(evidence['files']) == 14 + 118 + 8
     assert all('--random-seed=42' in pair[1] for pair in commands)
 
 

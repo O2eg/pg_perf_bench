@@ -195,7 +195,7 @@ def test_wal_permission_failure_is_checked_when_opening_target_database(tmp_path
     db = MagicMock(close=AsyncMock(), fetch=AsyncMock(return_value=[]))
 
     async def fetchval(sql, *args):
-        if 'pg_is_in_recovery' in sql or 'is_superuser' in sql:
+        if 'pg_is_in_recovery' in sql or 'is_superuser' in sql or 'pg_locks' in sql:
             return False
         if 'pg_current_wal_insert_lsn' in sql:
             import asyncpg

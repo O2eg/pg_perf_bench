@@ -170,13 +170,15 @@ Collection:
 
 Benchmark:
 
-- in database reset mode, terminates sessions connected to the selected benchmark database;
-- with `--reset-mode database` (default), recreates the database from `template0` each iteration;
+- when resetting the database, terminates sessions connected to the selected benchmark database;
+- with `--reset-mode database` (default), recreates the database from `template0` when initialization is scheduled;
 - with `--reset-mode schema`, resets profile schemas in an existing database without a restart;
 - refuses `postgres`, `template0`, and `template1`;
-- requires the explicit `--allow-database-reset` confirmation;
+- requires `--allow-database-reset` for `each-iteration` and `once`; `skip` never resets data;
 - drops OS filesystem caches only when `--drop-os-caches` is supplied;
-- accepts a replacement PostgreSQL configuration only in benchmark mode.
+- accepts a replacement PostgreSQL configuration only in benchmark mode;
+- rejects a competing benchmark on the same PostgreSQL server before reset or
+  configuration changes; see [reset protection](#concurrent-runs-and-reset-protection).
 
 Use only a dedicated disposable database. Prefer a disposable environment
 provisioned by `pg_stand` for development and integration tests.
@@ -246,7 +248,7 @@ Exactly one iteration axis is required:
 The axis does not add pgbench options automatically; the workload command must
 use the corresponding placeholder.
 
-Example:
+Standard pgbench read/write (`tpcb-like`) example:
 
 ```bash
 PGPASSWORD=secret pg-perf-bench benchmark \
@@ -261,15 +263,51 @@ PGPASSWORD=secret pg-perf-bench benchmark \
   --benchmark-type default \
   --pgbench-clients 1,4,16 \
   --init-command 'ARG_PGBENCH_PATH -i -s 10 -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER ARG_PG_DATABASE' \
-  --workload-command 'ARG_PGBENCH_PATH -T 60 -c ARG_PGBENCH_CLIENTS -j ARG_PGBENCH_CLIENTS -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER ARG_PG_DATABASE' \
+  --workload-command 'ARG_PGBENCH_PATH --builtin=tpcb-like -T 60 -c ARG_PGBENCH_CLIENTS -j ARG_PGBENCH_CLIENTS -h ARG_PG_HOST -p ARG_PG_PORT -U ARG_PG_USER ARG_PG_DATABASE' \
   --command-timeout 120 \
   --report-name local-pg18
 ```
+
+This uses the standard pgbench tables and its built-in read/write transaction:
+update an account, read its balance, update a teller and a branch, and insert
+a history row within `BEGIN`/`END`. `--builtin=tpcb-like` explicitly selects
+the same script that pgbench uses by default. `pgbench -i -s 10` controls the
+initial dataset scale; `-T 60` measures each client count for 60 seconds.
+Use `--system-metrics-interval 30` to sample OS metrics every 30 seconds.
+The minimum accepted interval and the default are **5 seconds**. Smaller or
+non-finite values are rejected before connecting to the database.
+This example uses legacy initialization and database reset; it requires a
+disposable database and does not support `--reset-mode schema`.
 
 The command timeout applies independently to legacy initialization, `VACUUM ANALYZE`, and
 workload commands. For the common loader it bounds each SQL job and replica wait, rather
 than the entire series of data batches. Allow enough time for the largest index build or
 table conversion. See [common initialization](INITIALIZATION.md).
+
+### Interrupted benchmark evidence
+
+Each CLI benchmark writes `<report-name>.progress.json` in the output directory
+before running iterations and updates it atomically after each completed point.
+If a later iteration fails or is cancelled, completed results remain available,
+along with available failed-command stdout/stderr and observed statement-timeout
+errors. The `failed_iteration` entry retains available initialization evidence,
+the before-workload storage snapshot, raw command output, and OS samples. Failed
+iterations never contribute a TPS point or maximum TPS, even when pgbench prints
+partial results with zero failed transactions.
+
+A failure or cancellation during iterations also produces a **partial HTML/JSON
+report**, with completed points and a separate failure section. `benchmark_status`
+is `failed` or `cancelled`; `collection_summary.status` is `partial`. A workload
+failure still returns exit code 6. Cancellation returns 130 in human mode or 7
+in machine mode. Machine responses include the saved artifact paths. Failures
+before iteration setup, during final environment collection/rendering, and forced
+termination (SIGKILL/power loss) cannot promise a final HTML report; the last
+successfully written checkpoint remains available.
+
+SQL-file workloads can set an explicit
+per-statement limit with `--statement-timeout-seconds`; `--command-timeout` remains
+the separate process/initialization limit.
+
 
 ### Workload placeholders
 
@@ -304,22 +342,81 @@ templates.
 duration and script count. Select one with `--workload-profile`; its schema,
 generator, setup and workload commands are supplied automatically.
 
-| Profile | Workload and default script weights | Default duration |
-|---|---|---:|
-| [`imdb`](src/pg_perf_bench/workload_profiles/imdb/README.md) | 38 analytical scripts over 21 tables; equal weights | 120 s |
-| [`pagila`](src/pg_perf_bench/workload_profiles/pagila/README.md) | OLTP: select / insert / update / delete = 50 / 25 / 20 / 5 | 60 s |
-| [`pagila-htap`](src/pg_perf_bench/workload_profiles/pagila-htap/README.md) | The same OLTP scripts plus reporting: 50 / 25 / 20 / 5 / 5 | 60 s |
+| Profile | Data access during measured workload | Workload and default script weights | Default duration |
+|---|---|---|---:|
+| [`imdb`](src/pg_perf_bench/workload_profiles/imdb/README.md) | Read-only: `SELECT`; no `INSERT`, `UPDATE` or `DELETE` | 11 active catalog/analytical operations over 21 tables; 3 scripts disabled; about 3.26% broad-report selections | 120 s |
+| [`pagila`](src/pg_perf_bench/workload_profiles/pagila/README.md) | Read/write: `SELECT`, `INSERT`, `UPDATE`, `DELETE` | OLTP: select / insert / update / delete = 50 / 25 / 20 / 5 | 60 s |
+| [`pagila-htap`](src/pg_perf_bench/workload_profiles/pagila-htap/README.md) | Read/write OLTP plus read-only analytical reports | The same OLTP scripts plus reporting: 50 / 25 / 20 / 5 / 5 | 60 s |
 
 Weights describe selection of whole pgbench scripts, each of which can execute
 several SQL statements or transactions. The default HTAP reporting share is
 `5 / 105`, approximately 4.8 %. Its reported TPS includes all five scripts.
 
+For these profiles, TPS counts completed pgbench script executions, not individual
+SQL statements. One script can execute multiple `SELECT`s, so IMDb TPS is not
+SELECTs per second. TPS across different profiles represents different work.
+
+The read/write classification applies only to the measured workload. All three
+profiles write data and build indexes during initialization. Read-only IMDb
+queries can still write and read temporary files when sorts or hash operations
+exceed their memory budget (`work_mem` and, for hash operations,
+`hash_mem_multiplier`); read-only does not mean zero disk writes.
+
 | Setting | How to configure it |
 |---|---|
 | Data volume | `--workload-scale SCALE`, default `1`; positive fractional values such as `0.25` are accepted. Generators retain minimum table sizes at small scales. |
-| Concurrent clients | `--pgbench-clients 1,2,4,8,16`; each value gets a fresh dataset using the selected reset mode. Bundled commands also use one pgbench job per client. |
+| Concurrent clients | `--pgbench-clients 1,2,4,8,16`; by default each value gets a fresh dataset; `--init-policy once` or `skip` reuses data. Bundled commands also use one pgbench job per client. |
 | Measured window per point | `--workload-duration-seconds 120`; overrides the profile default for every client count. |
+| Per-statement time limit | `--statement-timeout-seconds 100` for direct pgbench SQL-file workloads; IMDb defaults to 300 seconds. Explicit SET/RESET in staged scripts enforces the limit through session poolers. Does not limit initialization; not supported for builtin-only commands. |
 | Command time limit | `--command-timeout 300`; allow enough time for initialization, pre-workload `VACUUM ANALYZE`, and the workload window plus completion of in-flight queries. |
+
+`--init-policy` controls **when** to reset and load; `--reset-mode` controls
+**what** to reset when initialization runs:
+
+| Initialization policy | Before the first iteration | Before later iterations |
+|---|---|---|
+| `each-iteration` (default) | Reset, load, finalize and vacuum/analyze | Repeat preparation with fresh data |
+| `once` | Reset, load, finalize and vacuum/analyze | Reuse the same dataset; no initialization or vacuum/analyze |
+| `skip` | Use an existing prepared dataset; run structural preflight checks | Reuse the same dataset; no initialization or vacuum/analyze |
+
+For example, load IMDb once and sweep client counts:
+
+```bash
+pg-perf-bench benchmark --managed \
+  --host db.example --port 5432 --user bench --database bench \
+  --workload-profile imdb --workload-scale 110 \
+  --pgbench-clients 8,16,64 --workload-duration-seconds 600 \
+  --init-policy once --reset-mode schema --init-fsync keep \
+  --allow-database-reset --report-name imdb-once
+```
+
+To use the prepared dataset in a later run, replace `--init-policy once` with
+`--init-policy skip`; omit `--allow-database-reset`, `--reset-mode` and loader
+options. Supply credentials through the normal environment/configuration.
+`skip` does not invoke initialization commands, change durability settings,
+restart PostgreSQL, or apply a custom server configuration. It rejects
+`--init-command`, `--pg-custom-config` and `--drop-os-caches`. `once` also rejects
+`--drop-os-caches`: cache dropping currently belongs to per-iteration server reset.
+All modes continue to collect storage snapshots and workload metrics.
+
+With `once` and `skip`, later points inherit cache state and changes made by earlier
+workloads. This is useful for read-only IMDb; Pagila and Pagila-HTAP also retain
+inserted, updated and deleted data. These results are not equivalent to fresh-data
+points. JSON/HTML record the policy and whether each iteration was initialized;
+the policy is included in the workload execution hash.
+
+`skip` checks the target connection and, for common load plans, schema access,
+readable existing relations and index validity. Builtin pgbench checks its four
+standard tables and columns; arbitrary legacy custom commands only get connection
+checks. This is not a full schema compatibility or data correctness proof: missing
+individual profile tables/columns, functions, distributions and generator version
+may still cause workload errors. `--workload-scale` remains an input to the profile,
+not a measurement or verification of existing data; actual sizes are recorded in
+storage snapshots. Prepare and validate the dataset before selecting `skip`.
+Direct SQL connections or compatible session pooling are required; transaction
+pooling is unsupported. The controller needs one connection for the entire
+`once`/`skip` sweep, including idle time between points. Configure pooler idle
+limits accordingly.
 
 Bundled profiles require `--pgbench-clients`; `--pgbench-time` is rejected.
 They select benchmark type `custom` automatically. `--workload-path` cannot be
@@ -367,6 +464,41 @@ client configuration, but a timed run can complete a different number of
 scripts; it does not guarantee identical observed mix proportions or TPS.
 These profiles use `profile.json`, independently of `pg_workload`'s
 scheduler-specific `profile.yml`.
+
+### Concurrent runs and reset protection
+
+All benchmark modes, including legacy/builtin initialization, acquire a session
+advisory lock before resetting data, applying a custom server configuration or
+starting workload. They also check the same lock key in **all databases on the
+connected PostgreSQL server**. This prevents a database-reset run connected to
+`postgres` from bypassing a schema/`skip` run connected to the target database.
+Because resets can restart PostgreSQL and initialization can change server-wide
+settings, runs against different databases on the same server are excluded too.
+Run independent comparisons on separate servers/clusters.
+
+The primary must already be reachable. Database reset uses `postgres` for the
+controller; schema reset and `skip` use the target database and do not require
+CONNECT on `postgres`. The role must be able to read `pg_catalog.pg_locks` and use
+session advisory locks (standard PostgreSQL grants allow this). No superuser
+privilege is added for the lock itself. A conflicting run fails before its
+reset/configuration changes; it does not terminate the lock holder.
+
+`once`/`skip` keep the controller lock across all points; `each-iteration` keeps it
+through preparation and measurement of each point. A full reset retains its
+controller during DROP/CREATE. When that reset deliberately restarts PostgreSQL,
+the target database is dropped first and the lock is reacquired after restart,
+before CREATE or loading. If another run acquires the lock during that restart,
+the original run stops; it does not recreate the database over the new owner.
+An unexpected lost controller connection/lock stops subsequent work instead of
+silently reconnecting. Locks are explicitly released on completion, error and
+cancellation; a closed backend also releases them.
+
+This is coordination between compatible pg-perf-bench processes, not protection
+against manual SQL, older versions without the cross-database check, or primary
+failover. Do not mix old and new processes on one server; do not manually reset
+or restart a benchmark target while it is in use. Session locks do not survive
+server restart/failover, and the utility does not transparently resume a sweep
+across either event.
 
 ### Fast initialization
 
@@ -582,14 +714,14 @@ compatible with the provider's permissions.
 
 ### Iteration lifecycle
 
-For each axis value with `--reset-mode database`, host access and no Patroni,
-the backend:
+For each point that initializes data (`each-iteration`, or the first point with
+`once`), with `--reset-mode database`, host access and no Patroni, the backend:
 
-1. verifies access to the PostgreSQL instance;
+1. verifies access to the primary and acquires the benchmark server lock;
 2. drops the dedicated benchmark database;
 3. stops PostgreSQL or the selected container;
 4. flushes filesystems and optionally drops host OS caches;
-5. starts PostgreSQL and recreates the database;
+5. starts PostgreSQL, reacquires the server lock, and recreates the database;
 6. runs the common initializer or the legacy initialization command;
 7. completes `VACUUM ANALYZE`, restores temporary loader settings, waits for replicas
    when using the common loader, and captures the Before workload size snapshot;
@@ -598,6 +730,10 @@ the backend:
 9. waits for any remaining OS sampling to finish, then captures the After workload size snapshot;
 10. stores both snapshots, raw stdout, stderr, return code, UTC start time, elapsed time, parsed
    pgbench metrics, and iteration metadata.
+
+With `skip`, or later points of `once`, it retains the data and controller lock,
+checks the lock, captures Before workload, and proceeds from step 8. No restart,
+initialization, vacuum/analyze or replica replay barrier is performed at these points.
 
 After the final iteration it collects the configured host and PostgreSQL facts
 and optionally archives PostgreSQL logs under `<output-dir>/db_logs/`, alongside
@@ -638,12 +774,13 @@ the client certificate and key. Server trust comes from `ctl.cacert` or
 `restapi.cafile`. The server's `restapi.certfile`/`restapi.keyfile` are not used as
 client credentials. All referenced files must be readable by the Patroni OS account.
 
-With `--reset-mode database`, before each iteration the utility checks that SQL
+When initialization is scheduled with `--reset-mode database`, the utility checks that SQL
 reaches the detected primary, drops the benchmark database, flushes filesystems,
 and requests a synchronous
 [`POST /restart`](https://patroni.readthedocs.io/en/latest/rest_api.html#restart-endpoint)
 on that member. It then waits for SQL access, verifies that the PostgreSQL start
-time changed, and recreates the benchmark database. Patroni and the Docker
+time changed, reacquires the benchmark server lock, and recreates the benchmark
+database. Patroni and the Docker
 container remain running. Use a direct connection to the selected primary;
 a SQL connection to another member is rejected.
 
@@ -832,11 +969,32 @@ The order is: reset the workload database or profile schemas → initialize → 
 collect **Before workload** → run `pgbench` → finish any
 remaining OS sampling → collect **After workload**. Preparation and size collection
 are outside the measured pgbench command. Waiting for the OS sampler prevents
-size-query CPU and I/O from entering its final samples. An explicit
-`--system-metrics-duration` longer than the workload delays the after snapshot
-until sampling finishes. No additional vacuum is run before the after snapshot.
+size-query CPU and I/O from entering its final samples. By default OS collection
+continues until pgbench actually exits, including scripts finishing after its
+requested `-T` window. Completed provider windows are retained on workload failure.
+The current sampling interval finishes before the after snapshot, so the last
+interval may include a short idle tail (up to one interval plus provider overhead).
+Providers run independent consecutive bounded windows, so a slow disk sampler
+does not delay CPU/network sampling. Their startup overhead can add small gaps,
+and memory includes a baseline at each window boundary. Cancellation during the
+final window waits for its bounded completion and saves the collected samples.
+If cleanup also fails after a workload error, the original error and iteration
+evidence are retained, with the cleanup error recorded separately. A successful
+workload remains a completed measurement if only the subsequent cleanup fails;
+the overall run is still reported as failed.
+
+`--system-metrics-duration` is an optional **maximum collection window**; it can
+truncate OS coverage if shorter than the actual workload. It no longer forces
+collection to continue to that limit after pgbench exits. The execution section
+shows requested workload duration, actual process elapsed time and OS collection
+elapsed time separately. No additional vacuum is run before the after snapshot.
 `VACUUM ANALYZE` uses `--command-timeout`; a failure stops the benchmark before
 the workload starts.
+This preparation sequence applies only when the iteration initializes data.
+`once` skips it after the first point; `skip` skips it for every point. Reused
+iterations still collect both storage snapshots, but do not vacuum/analyze or
+repeat the loader's physical-replica replay barrier. Check retained data and
+replica readiness separately before a comparison that depends on them.
 
 The database item lists **every database on the instance**, including templates,
 with `is_workload_database` marking the target. Sizes cover database files across
@@ -980,6 +1138,22 @@ Stable exit codes:
 | 130 | interrupted by the user |
 
 ## Validation and tests
+
+Concurrency and initialization-policy regressions can run on an isolated local
+PostgreSQL without a prepared benchmark database:
+
+```bash
+PG_PERF_LOCAL_BIN=/usr/lib/postgresql/18/bin \
+python -m pytest -q -m integration \
+  tests/integration/test_init_policy.py tests/integration/test_benchmark_lock.py
+```
+
+Run as a non-root OS user with `initdb`, `pg_ctl`, `postgres`, `psql` and `pgbench`
+available. The tests create temporary clusters on loopback and unused ports,
+including real server restarts, then stop them. They check cross-database reset
+conflicts, simultaneous acquisition, an unprivileged controller, connection loss,
+and retained data across `once`/`skip` iterations. They do not connect to the
+configured benchmark clusters.
 
 Validate the installed templates, command references, Python collectors, and
 join task definitions:

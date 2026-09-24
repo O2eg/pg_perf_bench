@@ -12,6 +12,7 @@ from tempfile import TemporaryDirectory
 from pg_perf_bench.errors import ConfigurationError
 from pg_perf_bench.executors.process import run_local_process
 from pg_perf_bench.initialization import profile_search_path, quote_identifier
+from pg_perf_bench.workload_timeout import timeout_milliseconds
 
 
 async def close_diagnostic_connection(db):
@@ -36,7 +37,7 @@ async def close_diagnostic_connection(db):
         raise
 
 
-def workload_environment(db_conf, plan=None, *, managed=False):
+def workload_environment(db_conf, plan=None, *, managed=False, statement_timeout_seconds=None):
     environment = os.environ.copy()
     for name, key in (
         ('PGHOST', 'host'),
@@ -67,6 +68,11 @@ def workload_environment(db_conf, plan=None, *, managed=False):
         environment['PGOPTIONS'] = (
             environment.get('PGOPTIONS', '') + ' -c search_path=' + escaped
         ).strip()
+    if statement_timeout_seconds is not None:
+        milliseconds = timeout_milliseconds(statement_timeout_seconds)
+        environment['PGOPTIONS'] = (
+            environment.get('PGOPTIONS', '') + f' -c statement_timeout={milliseconds}'
+        ).strip()
     return environment
 
 
@@ -79,6 +85,8 @@ async def check_workload_session(
     timeout,
     managed=False,
     pgbench_protocol='simple',
+    statement_timeout_seconds=None,
+    sql_statement_timeout=False,
 ):
     """Probe libpq session behavior before resetting a pre-created database.
 
@@ -96,7 +104,12 @@ FROM pg_catalog.regexp_matches(
     '("(?:[^"]|"")*"|[^,[:space:]]+)[[:space:]]*(,|$)', 'g'
 ) AS m;
 """
-    environment = workload_environment(db_conf, plan, managed=managed)
+    environment = workload_environment(
+        db_conf,
+        plan,
+        managed=managed,
+        statement_timeout_seconds=None if sql_statement_timeout else statement_timeout_seconds,
+    )
     result = await run_local_process(
         [psql_path, '-X', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-c', sql],
         env=environment,
@@ -115,6 +128,34 @@ FROM pg_catalog.regexp_matches(
             'smart_search_path_enquoting=yes or use a direct primary endpoint. '
             'Session pooling must preserve libpq search_path startup options.'
         )
+    if statement_timeout_seconds is not None:
+        probe_sql = "SELECT setting FROM pg_settings WHERE name='statement_timeout'"
+        if sql_statement_timeout:
+            probe_sql = (
+                f'SET statement_timeout={timeout_milliseconds(statement_timeout_seconds)}; '
+                + probe_sql
+            )
+        timeout_probe = await run_local_process(
+            [
+                psql_path,
+                '-X',
+                '-A',
+                '-t',
+                '-v',
+                'ON_ERROR_STOP=1',
+                '-c',
+                probe_sql,
+                '-q',
+            ],
+            env=environment,
+            timeout=timeout,
+            secrets=(db_conf.get('password'),),
+        )
+        if timeout_probe.stdout.strip() != str(timeout_milliseconds(statement_timeout_seconds)):
+            raise ConfigurationError(
+                'Workload statement_timeout was rewritten by the endpoint; '
+                'no schemas were reset. The endpoint must preserve the configured timeout policy.'
+            )
     if pgbench_protocol in ('simple', 'extended'):
         # The simple query protocol leaves no server-side prepared statements,
         # so session pooling does not need pool_discard for this workload.
