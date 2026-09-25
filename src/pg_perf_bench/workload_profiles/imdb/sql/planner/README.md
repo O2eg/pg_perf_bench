@@ -27,8 +27,9 @@ implementation or a realistic traffic mix.
 
 ## Choosing a workload
 
-Use the 14 scripts in the parent `sql` directory for the supported catalog workload.
-They return coherent records or explicitly defined aggregate groups and are
+Use the 11 active scripts in the parent `sql` directory for the default catalog workload;
+three other scripts are disabled and excluded from the default command.
+The active scripts return coherent records or explicitly defined aggregate groups and are
 validated against an independent source-record oracle. See the
 [profile README](../../README.md) for data contracts, weights and timeout policy.
 

@@ -18,6 +18,7 @@ initializer documentation, and packaged profile and JOIN READMEs.
 | [SSH transport](ssh_mode_usage.md) | PostgreSQL runs on a remote host reached through SSH |
 | [Managed PostgreSQL](managed_mode_usage.md) | SQL-only access to a pre-created benchmark database |
 | [Workload configuration](workload_description.md) | You are defining the init command, measured command, and iteration axis |
+| [Source synchronization](sidecar-source-workflow.md) | You are developing from a checkout and updating a separate load-generator host |
 | [Reports and comparisons](logic_building_and_comparing_reports.md) | You are consuming JSON/HTML artifacts or joining benchmark runs |
 | [`pg_play` integration](pg_play-integration.md) | You are invoking the versioned machine contract from an orchestrator |
 

@@ -7,9 +7,12 @@ current logical workload day. All generated receipt dates are reachable; the upp
 window bound advances with `benchmark_now()` without rewriting a shared counter. All period boundaries
 and daily groups use UTC, independently of the server's `TimeZone`.
 
-The seven dashboard queries return cashier revenue, category revenue, catalog
-counts for the selected category, daily rentals of that category, its most-rented
-titles, daily cash receipts, and loyalty candidates. Revenue is attributed to
+Four dashboard queries are active by default: category catalog counts (query 3),
+most-rented titles (5), daily cash receipts (6), and loyalty candidates (7).
+Cashier revenue (1), category revenue (2), and daily rentals/returns (4) remain
+in block comments pending optimization and are not executed. To include one,
+uncomment its block in a copied custom profile and use the same SQL on all
+compared environments. Revenue is attributed to
 payment dates; `paid_rentals` counts distinct rentals within a payment day.
 Rentals are counted directly from `rental`, so extra payments do not inflate them.
 Store attribution follows the issuing cashier's store, not a copy's current
@@ -27,7 +30,7 @@ are byte-identical to `pagila`. Weights remain `01_select` 50, `02_insert` 25,
 `03_update` 20, `04_delete` 5, `05_reporting` 5. Reporting probability is 5/105
 (about 4.76%); its fraction of elapsed client time depends on query latency.
 Clients share this mix, so the profile does not reserve a separate analyst pool.
-The seven statements run in a read-only transaction at the connection's isolation
+The four active statements run in a read-only transaction at the connection's isolation
 level; default READ COMMITTED does not promise a single cross-statement snapshot.
 
 The shared [data and time contract](../pagila/README.md#data-and-time-contract)
